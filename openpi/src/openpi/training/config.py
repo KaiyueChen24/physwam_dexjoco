@@ -650,6 +650,9 @@ class TrainConfig:
     # Specifies which weights should be frozen.
     freeze_filter: tyro.conf.Suppress[Filter] = dataclasses.field(default_factory=nnx.Nothing)
 
+    # [验证/loss] 分组框架的留出数据、频率与批次；None 保持原始上游训练行为。
+    validation: dict | None = None
+
     # Determines the data to be trained on.
     data: DataConfigFactory = dataclasses.field(default_factory=FakeDataConfig)
 

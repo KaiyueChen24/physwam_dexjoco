@@ -458,3 +458,5 @@ Bundled third-party components and assets retain their separate license terms:
 ## 单臂／双臂多任务训练与部署
 
 [单臂／双臂多任务训练与部署](docs/group_training.md)：任务均衡采样、本地合成数据 smoke test、H100 LoRA 训练、共享策略服务、批量评测与结果汇总。
+
+[中文参数配置索引](docs/configuration_guide.md)：模型、数据、训练、GPU、部署、推理与闭环评测参数的类别和来源。

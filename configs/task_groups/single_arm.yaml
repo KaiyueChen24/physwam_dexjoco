@@ -1,57 +1,117 @@
+# 共享任务组配置：训练（train）与评测（eval）共同引用。
+# 实验参数见 configs/experiments/；类别与命令行参数见 docs/configuration_guide.md。
+
+# [配置格式] 任务组结构版本，目前仅接受 1。
 schema_version: 1
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 name: single_arm
+# [机器人] single_arm 为单臂，dual_arm 为双臂。
 robot_type: single_arm
+# [数据/状态维度] 原始机器人状态向量长度，单臂 23、双臂 46。
 state_dim: 23
+# [数据/动作维度] 原始物理动作向量长度，单臂 22、双臂 44。
 action_dim: 22
+# [模型/π0.5] π0.5 动作张量维度，单臂补齐到 32、双臂为 44；FastWAM 使用原始 action_dim。
 model_action_dim: 32
+# [数据/路径] 各任务数据目录的父目录；相对路径以 DexJoCo 仓库根目录为准。
 dataset_root: datasets/dexjoco_lerobot_datasets
+# [数据/采样] 默认任务采样方式；π0.5 实验 YAML 会覆盖此值，FastWAM 直接使用其实验 YAML。
 sampling: task_balanced
+# [任务组] 联合训练的任务列表；每个组默认训练一个共享策略。
 tasks:
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: water_plant
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: water_plant
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Grasp the watering can and apply water to the plant.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: front
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/water_plant.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: hammer_nail
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: hammer_nail
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Use the hammer to drive the nail into the wooden board.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: front
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/hammer_nail.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: click_mouse
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: click_mouse
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Move the mouse to the purple mouse pad and click the left mouse button.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego_right
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/click_mouse.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: pick_bucket
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: pick_bucket
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Place the boxed food into the bucket and then lift the bucket.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: front
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/pick_bucket.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: pinch_tongs
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: pinch_tongs
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Grasp the tongs and perform three consecutive open-close motions.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: front
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/pinch_tongs.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: fold_glasses
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: fold_glasses
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Fold the glasses and place them into the case.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: front
+    # [数据/相机] 单臂腕部视角映射。
     wrist: wrist
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/fold_glasses.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null

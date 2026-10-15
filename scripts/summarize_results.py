@@ -43,7 +43,7 @@ def summarize(directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--evaluation-dir", required=True)
+    parser.add_argument("--evaluation-dir", required=True, help='[闭环评测] 包含 plan.json 和逐任务结果的评测目录，汇总写回该目录。')
     args = parser.parse_args()
     directory = repo_path(args.evaluation_dir)
     result = summarize(directory)

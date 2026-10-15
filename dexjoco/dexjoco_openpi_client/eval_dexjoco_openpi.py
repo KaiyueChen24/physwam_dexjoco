@@ -227,20 +227,50 @@ def _append_video_frames(video_writers: dict, raw_images: dict):
 
 
 def main(
+    # [评测/环境] 单个任务的环境 YAML 路径。
     config: Path,
+    # [评测/随机性] 本次环境随机种子，与训练 seed 独立。
     seed: int = 0,
+    # [评测/随机化] 是否启用完整视觉/场景随机化。
     rand_full: bool = False,
+    # [评测/动力学] 是否随机化环境动力学。
     randomize_dynamics: bool = False,
+    # [部署/连接] π0.5 策略服务端口。
     port: int = 8000,
+    # [部署/连接] π0.5 策略服务器地址。
     host: str = "0.0.0.0",
+    # [保存/评测] 视频与成功率结果目录；None 时使用默认 outputs 路径。
     output: Path | None = None,
+    # [评测/渲染] rgb_array 为图像评测，human 为交互窗口。
     render_mode: Literal["rgb_array", "human"] = "rgb_array",
+    # [评测/重规划] 缓存动作少于该比例乘以 horizon 时请求新预测；还须满足无等待请求。
     replan_ratio: float = 0.8,
+    # [评测/预算] 本次任务的回合总数。
     episodes: int = 50,
+    # [模型/兼容] 是否将单臂状态补齐到 46 维，仅用于相应兼容模型。
     pad_state_dim46: bool = False,
+    # [评测/记录] 是否记录按下的密码数字；None 时仅 iPad 任务自动开启。
     record_pressed_digits: bool | None = None,
+    # [日志/延迟] 推理耗时 JSONL 路径；None 时不额外记录。
     metrics_output: Path | None = None,
 ):
+    """运行单个 DexJoCo 任务的 π0.5 闭环评测。
+
+    Args:
+        config: [评测/环境] 单个任务的环境 YAML 路径。
+        seed: [评测/随机性] 本次环境随机种子，与训练 seed 独立。
+        rand_full: [评测/随机化] 是否启用完整视觉/场景随机化。
+        randomize_dynamics: [评测/动力学] 是否随机化环境动力学。
+        port: [部署/连接] π0.5 策略服务端口。
+        host: [部署/连接] π0.5 策略服务器地址。
+        output: [保存/评测] 视频与成功率结果目录；None 时使用默认 outputs 路径。
+        render_mode: [评测/渲染] rgb_array 为图像评测，human 为交互窗口。
+        replan_ratio: [评测/重规划] 缓存动作少于该比例乘以 horizon 时请求新预测；还须满足无等待请求。
+        episodes: [评测/预算] 本次任务的回合总数。
+        pad_state_dim46: [模型/兼容] 是否将单臂状态补齐到 46 维，仅用于相应兼容模型。
+        record_pressed_digits: [评测/记录] 是否记录按下的密码数字；None 时仅 iPad 任务自动开启。
+        metrics_output: [日志/延迟] 推理耗时 JSONL 路径；None 时不额外记录。
+    """
     if render_mode == "rgb_array":
         os.environ.setdefault("MUJOCO_GL", "egl")
     else:

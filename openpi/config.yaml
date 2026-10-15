@@ -1,12 +1,25 @@
-pretrained_model_path: "../checkpoints/pi05_base/params" # path to the pretrained model weights
-pretrained_model_action_dim_44_path: "../checkpoints/pi05_base_action_dim_44/params" # path to the pretrained model weights (action head expanded to 44 for bimanual tasks)
-dataset_root: "../datasets/dexjoco_lerobot_datasets" # expected layout: <dataset_root>/<task_name>/, e.g. hammer_nail, click_mouse, ..., bimanual_photograph
-rand_full_dataset_root: "../datasets/dexjoco_lerobot_datasets_rand_full" # expected layout: <rand_full_dataset_root>/<task_name>/ with the same 11 task names
+# 【原始 OpenPI 入口】供 openpi.training.dexjoco_configs 导入读取。
+# 分组训练脚本优先使用 configs/experiments/*.yaml；这里不是分组实验参数的唯一来源。
+
+# [初始化/单臂] π0.5 基础参数目录，相对于运行 openpi 的工作目录。
+pretrained_model_path: "../checkpoints/pi05_base/params"
+# [初始化/双臂] 44 维动作头基础参数目录。
+pretrained_model_action_dim_44_path: "../checkpoints/pi05_base_action_dim_44/params"
+# [数据/路径] rand_obj 数据父目录，其下按任务名组织。
+dataset_root: "../datasets/dexjoco_lerobot_datasets"
+# [数据/路径] rand_full 数据父目录，其下按任务名组织。
+rand_full_dataset_root: "../datasets/dexjoco_lerobot_datasets_rand_full"
+# [保存/路径] 原始 rand_obj 训练结果根目录。
 ckpts_root: "../checkpoints/pi05_ckpts"
+# [保存/路径] 原始 rand_full 训练结果根目录。
 rand_full_ckpts_root: "../checkpoints/pi05_rand_full_ckpts"
+# [日志/在线记录] 原始训练入口的 W&B 开关。
 wandb_enabled: true
 
+# [训练/批次] 原始 JAX 训练器的全局 batch size。
 batch_size: 32
-# batch_size: 1 # for test
+# batch_size: 1  # [训练/调试] 原始入口的小 batch 示例，当前未启用。
+# [训练/单臂预算] 原始单臂训练配置的更新步数。
 single_arm_steps: 30000
+# [训练/双臂预算] 原始双臂训练配置的更新步数。
 dual_arm_steps: 60000

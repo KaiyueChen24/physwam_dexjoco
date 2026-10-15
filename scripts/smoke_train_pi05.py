@@ -9,7 +9,7 @@ import numpy as np
 import yaml
 
 from group_common import (Tee, build_train_config, load_trainer, resolve, training_parser,
-                          validate_gpu, write_run)
+                          validate_gpu, write_run, resolve_training_split)
 from train_group import compute_stats, prepare_data
 
 
@@ -41,6 +41,10 @@ def run_smoke(config, resolved):
                      state_sharding, batch_sharding), out_shardings=(state_sharding, None),
         donate_argnums=(1,),
     )
+    validation = None
+    if config.validation:
+        from openpi.training.dexjoco_validation import ValidationRunner
+        validation = ValidationRunner(config, state, state_sharding, batch_sharding)
     records = []
     for step in range(config.num_train_steps):
         with sharding.set_mesh(mesh):
@@ -50,6 +54,8 @@ def run_smoke(config, resolved):
             raise FloatingPointError(f"Nonfinite metrics at step {step}: {metrics}")
         records.append(metrics)
         print(f"Smoke step {step + 1}/{config.num_train_steps}: {metrics}", flush=True)
+        if validation and ((step + 1) % config.validation["interval"] == 0 or step + 1 == config.num_train_steps):
+            print("Validation:", validation.evaluate(state.params, step + 1), flush=True)
     final = [np.asarray(x) for x in jax.tree.leaves(state.params.filter(config.trainable_filter))]
     delta = max(float(np.max(np.abs(a - b))) for a, b in zip(initial, final, strict=True))
     if not np.isfinite(delta) or delta <= 0:
@@ -93,6 +99,7 @@ def main():
     if args.dry_run:
         print(yaml.safe_dump(resolved, sort_keys=False))
         return
+    resolve_training_split(resolved)
     config = build_train_config(resolved)
     # Fail before creating run artifacts if the full-model checkpoint/GPU is absent.
     validate_gpu(config, args.tiny)

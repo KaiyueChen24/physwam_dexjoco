@@ -1,25 +1,51 @@
-schema_version: 1
-model: pi05
-action_horizon: 30
-max_token_len: 250
-seed: 42
-fsdp_devices: 1
-wandb_enabled: false
-learning_rate: 5.0e-05
-sampling: task_balanced
-dataset_root: null
-video_backend: pyav
-stats_samples: 512
-stats_batch_size: 256
-checkpoint_paths:
-  single_arm: checkpoints/pi05_dexjoco_ckpt/water_plant/params
-  dual_arm: checkpoints/pi05_base_action_dim_44/params
-synthetic: true
-batch_size: 1
-num_workers: 0
-num_train_steps: 20
-warmup_steps: 2
-log_interval: 1
-save_interval: 10
-keep_period: null
-synthetic_frames_per_task: 64
+# π0.5 本地流程检查：由 scripts/smoke_train_pi05.py 默认读取。
+# 合成数据用于验证更新、保存、恢复，不用于报告任务成功率；不保证完整模型能装入本地显存。
+
+# 【配置格式 / config】
+schema_version: 1                       # [配置格式] 配置结构版本，目前仅接受 1。
+model: pi05                            # [模型] 使用 π0.5；--tiny 会改用仅验证框架的 dummy 模型。
+
+# 【模型 / model】
+action_horizon: 30                     # [模型/动作序列] 一次预测的动作步数；与现有 π0.5 评测器保持一致。
+max_token_len: 250                      # [模型/文本] 任务文字与离散状态的 token 总长度上限，不含图像 token。
+
+# 【GPU 与并行 / gpu】
+fsdp_devices: 1                        # [GPU/参数分片] 每组参与参数分片的卡数；实际显卡由 --gpus 指定。
+
+# 【数据 / data】
+sampling: task_balanced                # [数据/采样] 每个任务等概率；不要求每个 batch 内严格均衡。
+dataset_root: null                     # [数据/路径] null 使用任务组路径；synthetic=true 时不读取真实数据。
+video_backend: pyav                     # [数据/视频] 真实数据的解码后端；合成数据模式下不解码视频。
+synthetic: true                         # [数据/来源] 使用合成图像、状态和动作，仅验证训练框架。
+synthetic_frames_per_task: 64           # [数据/合成规模] 每个任务生成的可索引帧数，不是真实示范数量。
+
+# 【归一化统计 / normalization】
+stats_samples: 512                     # [归一化/抽样] 按训练混合分布有放回抽取的低维帧总数。
+stats_batch_size: 256                  # [归一化/CPU 批次] 每次累计多少帧状态与动作，不是训练 batch。
+
+# 【初始化权重 / initialization】
+checkpoint_paths:                      # [初始化/路径] 相对于仓库根目录；--tiny 不读取这些权重。
+  single_arm: checkpoints/pi05_dexjoco_ckpt/water_plant/params  # [初始化/单臂] 已有 water_plant 权重，仅供链路检查。
+  dual_arm: checkpoints/pi05_base_action_dim_44/params        # [初始化/双臂] 需预先准备的 44 维基础权重。
+
+# 【训练与优化 / train】
+seed: 42                               # [训练/随机性] 模型、合成数据、采样与统计的随机种子。
+batch_size: 1                          # [训练/批次] 所有 GPU 合计的全局 batch；默认单卡执行。
+num_workers: 0                         # [数据/CPU] 0 表示在主进程加载数据，便于定位 smoke 问题。
+num_train_steps: 20                    # [训练/预算] 保存恢复前的更新步数；smoke 还会恢复后再更新 1 步。
+learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前预热后保持此值。
+warmup_steps: 2                         # [训练/预热] 学习率预热更新步数。
+
+# 【日志与模型保存 / logging & checkpoint】
+wandb_enabled: false                   # [日志/在线记录] 关闭 W&B 上传，仍保存本地 train.log。
+log_interval: 1                         # [日志/频率] 通用训练入口的记录间隔；专用 smoke 固定每步打印。
+save_interval: 10                       # [保存/频率] 通用训练入口的保存间隔；专用 smoke 在恢复前后保存。
+keep_period: null                       # [保存/保留] 不额外保留周期点；专用 smoke 固定使用其恢复验证保存策略。
+
+# 【留出验证集 / validation：只计算 loss，不参与训练】
+validation_ratio: 0.1                 # [验证/划分] 每任务留出的完整 episode 比例；0 关闭，按数量向上取整且保留训练 episode。
+validation_seed: 42                   # [验证/随机性] episode 划分及验证噪声的固定种子，两种模型使用相同值可复用划分。
+validation_interval: 10               # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
+validation_batch_size: 1                # [验证/批次] 所有 GPU 合计的验证 batch，须能被可见卡数整除。
+validation_max_batches: null          # [验证/预算] null 遍历完整留出集；整数限制每任务验证批次数，结果会标注是否全量。
+synthetic_episode_count: 8            # [数据/合成] 每任务合成 episode 数，仅用于检查训练/验证隔离，不是真实示范。

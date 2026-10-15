@@ -1,59 +1,116 @@
+# 共享任务组配置：训练（train）与评测（eval）共同引用。
+# 实验参数见 configs/experiments/；类别与命令行参数见 docs/configuration_guide.md。
+
+# [配置格式] 任务组结构版本，目前仅接受 1。
 schema_version: 1
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 name: dual_arm
+# [机器人] single_arm 为单臂，dual_arm 为双臂。
 robot_type: dual_arm
+# [数据/状态维度] 原始机器人状态向量长度，单臂 23、双臂 46。
 state_dim: 46
+# [数据/动作维度] 原始物理动作向量长度，单臂 22、双臂 44。
 action_dim: 44
+# [模型/π0.5] π0.5 动作张量维度，单臂补齐到 32、双臂为 44；FastWAM 使用原始 action_dim。
 model_action_dim: 44
+# [数据/路径] 各任务数据目录的父目录；相对路径以 DexJoCo 仓库根目录为准。
 dataset_root: datasets/dexjoco_lerobot_datasets
+# [数据/采样] 默认任务采样方式；π0.5 实验 YAML 会覆盖此值，FastWAM 直接使用其实验 YAML。
 sampling: task_balanced
+# [任务组] 联合训练的任务列表；每个组默认训练一个共享策略。
 tasks:
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: bimanual_microwave_cook
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: bimanual_microwave_cook
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Open the microwave door, place the food inside the microwave, close the
     door, and press the start button.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego
+    # [数据/相机] 左腕视角映射。
     wrist_left: wrist_left
+    # [数据/相机] 右腕视角映射。
     wrist_right: wrist_right
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/bimanual_microwave_cook.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: bimanual_unlock_ipad
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: bimanual_unlock_ipad
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Grasp the iPad and enter the password 123 to unlock the device.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego
+    # [数据/相机] 左腕视角映射。
     wrist_left: wrist_left
+    # [数据/相机] 右腕视角映射。
     wrist_right: wrist_right
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/bimanual_unlock_ipad.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: bimanual_hanoi
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: bimanual_hanoi
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: 'Execute the final two moves of the three-level Tower of Hanoi: move the
     medium disk from the middle peg to the right peg with the right hand, then move
     the small disk from the left peg to the right peg with the left hand.'
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego
+    # [数据/相机] 左腕视角映射。
     wrist_left: wrist_left
+    # [数据/相机] 右腕视角映射。
     wrist_right: wrist_right
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/bimanual_hanoi.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: bimanual_assembly
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: bimanual_assembly
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Grasp the tray with the left hand and the peg with the right hand, then
     insert the peg into the hole.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego
+    # [数据/相机] 左腕视角映射。
     wrist_left: wrist_left
+    # [数据/相机] 右腕视角映射。
     wrist_right: wrist_right
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/bimanual_assembly.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null
+# [任务组] 顶层为组名；任务条目中的 name 为环境任务标识。
 - name: bimanual_photograph
+  # [数据/路径] dataset_root 下的任务子目录名。
   dataset: bimanual_photograph
+  # [任务指令] 推理时传给策略的语言指令；π0.5 训练优先读取数据的 task 文本，此处作回退。
   prompt: Grasp the camera with the left hand, align it with the logo, and press the
     shutter button with the right hand.
+  # [数据/相机] 左侧为策略相机键，右侧为数据特征与评测环境的相机名称。
   cameras:
+    # [数据/相机] 主视角映射。
     base: ego
+    # [数据/相机] 左腕视角映射。
     wrist_left: wrist_left
+    # [数据/相机] 右腕视角映射。
     wrist_right: wrist_right
+  # [评测/eval] 对应仿真环境配置；评测时使用组快照中的 prompt 与 cameras 覆盖同名设置。
   eval_config: configs/rand_obj/bimanual_photograph.yaml
+  # [数据/划分候选] null 使用全部示范作为候选；列表限制候选 episode；开启验证后再从候选中划分训练/验证。
   episodes: null

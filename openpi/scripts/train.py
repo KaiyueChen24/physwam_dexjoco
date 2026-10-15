@@ -255,6 +255,12 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
+    # [验证/loss] 独立留出集只做前向计算，沿用训练资产；不改变优化器状态。
+    validation = None
+    if config.validation:
+        from openpi.training.dexjoco_validation import ValidationRunner
+        validation = ValidationRunner(config, train_state, train_state_sharding, data_sharding)
+
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
         range(start_step, config.num_train_steps),
@@ -278,6 +284,13 @@ def main(config: _config.TrainConfig):
             wandb.log(reduced_info, step=step)
             infos = []
         batch = next(data_iter)
+
+        completed_step = int(train_state.step)
+        if validation and (completed_step % config.validation["interval"] == 0 or completed_step == config.num_train_steps):
+            result = validation.evaluate(train_state.params, completed_step)
+            logging.info("[validation] step=%d val_loss=%.6f tasks=%s", completed_step, result["val_loss"], result["task_losses"])
+            wandb.log({"val/loss": result["val_loss"],
+                       **{f"val/{task}/loss": value for task, value in result["task_losses"].items()}}, step=completed_step)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)

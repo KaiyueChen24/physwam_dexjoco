@@ -8,7 +8,7 @@ import numpy as np
 import yaml
 
 from group_common import (Tee, build_train_config, load_trainer, resolve, training_parser,
-                          validate_gpu, write_run)
+                          validate_gpu, write_run, resolve_training_split)
 
 
 def prepare_data(config, resolved, check_images=False):
@@ -17,7 +17,8 @@ def prepare_data(config, resolved, check_images=False):
     dataset = MultiTaskDataset(resolved["group"], config.model.action_horizon)
     manifest = {"group": resolved["group"]["name"], "synthetic": dataset.synthetic,
                 "sampling": resolved["experiment"]["sampling"], "tasks": dataset.manifest,
-                "normalization": "seeded frame sampling using the training task mixture; training episodes only"}
+                "normalization": "seeded frame sampling using the training task mixture; training episodes only",
+                "data_split": resolved.get("data_split")}
     if check_images:
         for index, task in enumerate(resolved["group"]["tasks"]):
             offset = dataset.ends[index - 1] if index else 0
@@ -56,12 +57,13 @@ def compute_stats(config, resolved, dataset):
 
 def main():
     parser = training_parser(__doc__)
-    parser.add_argument("--stage", choices=("prepare", "stats", "train"), default="train")
+    parser.add_argument("--stage", choices=("prepare", "stats", "train"), default="train", help='[训练] prepare 检查数据；stats 计算归一化；train 执行训练（缺统计时自动计算）。')
     args = parser.parse_args()
     resolved = resolve(args)
     if args.dry_run:
         print(yaml.safe_dump(resolved, sort_keys=False))
         return
+    resolve_training_split(resolved)
     config = build_train_config(resolved, args.resume)
     if args.stage == "train":
         validate_gpu(config, resolved["experiment"].get("tiny", False))

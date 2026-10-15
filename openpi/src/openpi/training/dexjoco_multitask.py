@@ -25,11 +25,15 @@ class MultiTaskDataset:
         self.synthetic = bool(spec.get("synthetic", False))
         self.datasets = []
         self.manifest = []
+        self.synthetic_indices = []
         lengths = []
         for task in spec["tasks"]:
             if self.synthetic:
-                length = int(spec.get("synthetic_frames_per_task", 64))
-                record = {"name": task["name"], "frames": length, "synthetic": True}
+                indices = task.get("synthetic_indices", list(range(int(spec.get("synthetic_frames_per_task", 64)))))
+                self.synthetic_indices.append(indices)
+                length = len(indices)
+                record = {"name": task["name"], "frames": length, "synthetic": True,
+                          "episodes": task.get("episodes")}
             else:
                 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 
@@ -75,7 +79,8 @@ class MultiTaskDataset:
         return task_index, local_index
 
     def _synthetic_sample(self, task_index, local_index):
-        rng = np.random.default_rng(int(self.spec.get("seed", 42)) + task_index * 100000 + local_index)
+        original_index = self.synthetic_indices[task_index][local_index]
+        rng = np.random.default_rng(int(self.spec.get("seed", 42)) + task_index * 100000 + original_index)
         state = rng.uniform(-0.5, 0.5, self.spec["state_dim"]).astype(np.float32)
         actions = rng.uniform(-0.5, 0.5, (self.horizon, self.spec["action_dim"])).astype(np.float32)
         sample = {"observation.state": state, "action": actions,

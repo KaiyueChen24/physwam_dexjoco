@@ -1,6 +1,15 @@
+# 【闭环评测 / eval】环境配置；GPU、服务地址、episodes 和 seeds 由启动命令指定。
+# rand_full 目录本身不会开启随机化；需使用对应入口的 --rand-full 或随机化配置。
+
+# [评测/环境] 要创建的 DexJoCo 仿真任务标识。
 env_name: click_mouse
-camera_mapping:  # pi0.5 image name -- env image name
+# [评测/相机] 左侧为策略输入键，右侧为仿真环境相机名称。
+camera_mapping:
+  # [评测/相机] 主视角映射。
   base: ego_right
+  # [评测/相机] 单臂腕部视角映射。
   wrist: wrist
+# [评测/任务指令] 每次观测携带的语言指令；内容保留原始英文。
 prompt: "Move the mouse to the purple mouse pad and click the left mouse button."
+# [评测/机器人] 决定使用单臂或双臂的状态/动作布局。
 robot_type: single_arm

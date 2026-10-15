@@ -7,13 +7,13 @@ from group_common import ROOT, load_group
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--group", choices=("single_arm", "dual_arm", "all"), default="all")
-    parser.add_argument("--data-revision", default="main")
-    parser.add_argument("--model-revision", default="main")
+    parser.add_argument("--group", choices=("single_arm", "dual_arm", "all"), default="all", help='[任务选择] 选择单臂或双臂任务组。')
+    parser.add_argument("--data-revision", default="main", help='[数据与 CPU] Hugging Face 数据集分支、标签或 commit，下载时记录实际 revision。')
+    parser.add_argument("--model-revision", default="main", help='[权重与结果保存] Hugging Face π0.5 模型分支、标签或 commit。')
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--data-only", action="store_true")
-    mode.add_argument("--weights-only", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--data-only", action="store_true", help='[数据与 CPU] 仅下载示范数据，不下载初始化权重。')
+    mode.add_argument("--weights-only", action="store_true", help='[权重与结果保存] 仅下载 π0.5 初始化权重，不下载示范数据。')
+    parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
     groups = [load_group(g) for g in (("single_arm", "dual_arm") if args.group == "all" else (args.group,))]
     data_patterns = [f"dexjoco_lerobot_datasets/{task['dataset']}/*" for g in groups for task in g["tasks"]]

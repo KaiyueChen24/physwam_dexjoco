@@ -1,5 +1,7 @@
 # π0.5 单臂／双臂多任务训练与部署
 
+参数类别、GPU 设置、部署与 eval 选项见 [中文配置索引](configuration_guide.md)。
+
 所有下面的命令从仓库根目录执行。脚本内部处理 OpenPI 的工作目录要求。
 单臂六任务共享一个 policy，双臂五任务共享另一个 policy；第一版采用 rand_obj。
 
@@ -7,8 +9,9 @@
 
 - `configs/task_groups/single_arm.yaml`：六个单臂任务、状态 23、数据动作 22、模型动作 32。
 - `configs/task_groups/dual_arm.yaml`：五个双臂任务、状态 46、数据／模型动作 44。
-- 每个任务配置语言指令、原始相机映射和可选 `episodes`（训练 episode ID 列表）。
-- `episodes: null` 使用全部示范；若设置训练/验证划分，应只列训练 ID，归一化也只使用这些 ID。
+- 每个任务配置语言指令、原始相机映射和可选 `episodes`（用于划分的候选 episode ID 列表）。
+- `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
+- 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
 - `local_smoke.yaml`：合成数据、batch 1、20 步、关闭 W&B 上传。
 - `h100_lora.yaml`：真实数据、LoRA、全局 batch 32、60,000 步起点。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
@@ -18,6 +21,43 @@
 - `task_balanced` 使每个任务获得相同采样概率；`frame_uniform` 按所有帧均匀采样。
 - 统计用固定 seed、按训练混合分布抽取低维帧，无需视频解码。样本数和方法写入 provenance。
 - 单臂保留官方 32 维模型 padding，输出裁剪到 22；双臂沿用官方 44 维动作头。
+
+## 留出验证集（仅计算 loss）
+
+`h100_lora.yaml` 和 `local_smoke.yaml` 已接入以下参数：
+
+```yaml
+# 【验证 / validation：只计算 loss，不反向传播】
+validation_ratio: 0.1          # [数据/划分] 每任务留出完整 episode 的比例；0 关闭
+validation_seed: 42            # [验证/随机性] 固定 episode 划分与验证噪声
+validation_interval: 1000      # [验证/频率] 每多少次更新计算一次；训练最后一步也计算
+validation_batch_size: 8       # [验证/GPU] π0.5 所有 GPU 合计的 batch，须能被可见卡数整除
+validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；整数限制每任务的验证批次数
+```
+
+本地 smoke 的验证间隔为 10、验证 batch 为 1；合成 episode 仅检查隔离与 loss 流程。
+真实数据按每任务的 episode 数向上取整，至少留一条验证和一条训练示范；不足两条时报错。
+例如每任务 100 条 episode，默认 90 条训练、10 条验证；episode 长短不一时帧数比例不保证恰为 9:1。
+同一任务在两个模型中采用相同的候选 episode、比例和种子时，得到相同划分。
+
+先运行已有的 `--stage prepare` 检查数据并保存划分；`--stage stats` 或 `train` 只使用训练部分计算统计。
+`--dry-run` 不访问真实数据，因此不展开实际 episode ID。完整数据划分在 prepare/stats/train 阶段确定。
+同一个 run 的比例、种子或候选数据不能改变；恢复会核对配置与 `data_split.json`。已有无验证的实验需要使用新的 run-name。
+
+验证逐任务遍历留出帧，动作 chunk 保持在各自 episode 内，复用训练归一化，关闭训练模式与数据增强。
+尾批次补齐只为满足 JAX 分片形状，重复项不计入 loss。默认全量验证不丢最后不足一个 batch 的样本。
+`task_balanced` 汇总为各任务平均 loss 的算术平均；`frame_uniform` 按实际验证样本数加权。
+如果设置批次上限，则每任务使用固定随机帧子集，记录 `full_validation: false`，不会冒充全量验证。
+
+运行产物：
+
+- `runs/<name>/data_split.json`：候选、训练和验证 episode ID，比例、种子与取整方式。
+- `resolved_config.yaml`：划分后的训练组和独立 validation_group。
+- `validation_loss.jsonl`：每个验证步的总 loss、逐任务 loss、已验证/可用样本数和是否全量。
+- `train.log`：`[validation] ... val_loss=...`；启用 W&B 时还记录 `val/loss`、`val/<task>/loss`。
+
+验证不调用梯度或优化器更新，不消耗训练使用的噪声随机流，不运行模拟器。
+本功能仅记录 loss，不自动早停或选择最佳 checkpoint；动作成功率仍由独立闭环评测衡量。
 
 ## 本地 smoke test
 
@@ -161,4 +201,6 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/test_group_framework.
 测试覆盖组别维度、相机映射、指令保留、任务均衡采样、episode 选择、完整结果判定。
 ROS 的 pytest 自动插件可能与 Conda Python 不兼容，因此关闭无关插件自动加载。
 
-FastWAM 尚未接入；后续可以复用任务组、数据来源和结果协议，但需要另写其训练和推理适配。
+FastWAM 使用同一任务组和独立训练／推理入口，单臂动作直接使用 22 维。
+完整框架、环境与命令见 [FastWAM 接入说明](fastwam_integration.md)。
+本页的 train_group.py、serve_group.py、evaluate_group.py 继续专用于 π0.5。

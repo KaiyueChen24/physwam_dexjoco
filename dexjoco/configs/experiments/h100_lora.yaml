@@ -17,7 +17,6 @@ fsdp_devices: 1                         # [GPU/参数分片] 每个分片组的�
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
 dataset_root: null                      # [数据/路径] null 使用任务组的数据根目录；--dataset-root 可覆盖。
 video_backend: pyav                     # [数据/视频] LeRobot 视频解码后端。
-synthetic: false                        # [数据/来源] false 读取真实示范；true 仅用于合成数据流程检查。
 
 # 【归一化统计 / normalization】
 stats_samples: 50000                    # [归一化/抽样] 按任务混合分布有放回抽取的训练帧总数；单、双臂分别统计。

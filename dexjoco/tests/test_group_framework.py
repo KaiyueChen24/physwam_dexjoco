@@ -19,8 +19,37 @@ from summarize_results import summarize
 
 
 @pytest.mark.parametrize("group,count,state,action", [("single_arm", 6, 23, 22), ("dual_arm", 5, 46, 44)])
-def test_group_shapes_and_task_prompts(group, count, state, action):
-    spec = {**load_group(group), "synthetic": True, "synthetic_frames_per_task": 7}
+def test_group_shapes_and_task_prompts(group, count, state, action, tmp_path, monkeypatch):
+    import lerobot.datasets.lerobot_dataset as lerobot
+    spec = load_group(group)
+    spec["dataset_root"] = str(tmp_path)
+    cameras = {camera for task in spec["tasks"] for camera in task["cameras"].values()}
+    for task in spec["tasks"]:
+        meta = tmp_path / task["dataset"] / "meta"
+        meta.mkdir(parents=True)
+        (meta / "info.json").write_text("{}")
+
+    class Metadata:
+        def __init__(self, *args, **kwargs):
+            self.features = {"action": {"shape": [action]}, "observation.state": {"shape": [state]},
+                             **{f"observation.images.{camera}": {} for camera in cameras}}
+            self.fps = 30
+            self.total_episodes = 100
+            self.info = {"codebase_version": "v3.0"}
+
+    class Dataset:
+        def __init__(self, *args, **kwargs):
+            self.hf_dataset = [{"action": np.zeros(action), "observation.state": np.zeros(state)}] * 7
+
+        def __len__(self):
+            return 7
+
+        def __getitem__(self, index):
+            return {"action": np.zeros((30, action)), "observation.state": np.zeros(state),
+                    **{f"observation.images.{camera}": np.zeros((3, 224, 224)) for camera in cameras}}
+
+    monkeypatch.setattr(lerobot, "LeRobotDatasetMetadata", Metadata)
+    monkeypatch.setattr(lerobot, "LeRobotDataset", Dataset)
     dataset = module.MultiTaskDataset(spec, 30)
     assert len(dataset) == count * 7
     for task_index, task in enumerate(spec["tasks"]):
@@ -29,11 +58,18 @@ def test_group_shapes_and_task_prompts(group, count, state, action):
         assert sample["observation.state"].shape == (state,)
         assert sample["action"].shape == (30, action)
         for camera in module.canonical_cameras(spec).values():
-            assert sample[f"observation.images.{camera}"].shape == (224, 224, 3)
+            assert sample[f"observation.images.{camera}"].shape == (3, 224, 224)
+        assert dataset.low_dim(task_index * 7)["actions"].shape == (action,)
     assert dataset.locate(7) == (1, 0)
     assert dataset.locate(-1) == (count - 1, 6)
     with pytest.raises(IndexError):
         dataset[len(dataset)]
+
+
+def test_missing_real_dataset_fails_instead_of_generating_frames(tmp_path):
+    spec = {**load_group("single_arm"), "dataset_root": str(tmp_path)}
+    with pytest.raises(FileNotFoundError, match="download this task first"):
+        module.MultiTaskDataset(spec, 30)
 
 
 def test_balanced_sampling_does_not_favor_long_tasks():
@@ -99,7 +135,7 @@ def test_success_marker_rejects_partial_episodes(tmp_path):
 
 def test_summary_keeps_missing_tasks_visible(tmp_path):
     plan = {"group": "single_arm", "run_name": "test", "server": {"checkpoint": "checkpoint",
-            "tasks": ["a", "b"], "synthetic": False},
+            "tasks": ["a", "b"], "data_source": "lerobot"},
             "jobs": [{"task": t, "seed": 0, "episodes": 5} for t in ("a", "b")]}
     (tmp_path / "plan.json").write_text(json.dumps(plan))
     job = tmp_path / "a_seed0"
@@ -127,13 +163,27 @@ def test_saved_run_paths_relocate_without_changing_external_data(tmp_path, monke
     run = destination / "runs/test"
     run.mkdir(parents=True)
     saved = {"schema_version": 1, "run_dir": str(source / "runs/test"),
-             "group": {"dataset_root": str(source / "datasets")},
-             "experiment": {"initialization_params": str(source / "checkpoints/base/params")}}
+             "group": {"dataset_root": str(source / "datasets"), "synthetic": False},
+             "experiment": {"initialization_params": str(source / "checkpoints/base/params"),
+                            "synthetic": False, "tiny": False}}
     (run / "resolved_config.yaml").write_text(yaml.safe_dump(saved))
     monkeypatch.setattr(group_common, "ROOT", destination)
     resolved = group_common.read_run(run)
+    assert "synthetic" not in resolved["group"]
+    assert "tiny" not in resolved["experiment"]
     assert resolved["group"]["dataset_root"] == str(destination / "datasets")
     assert resolved["experiment"]["initialization_params"] == str(destination / "checkpoints/base/params")
     saved["group"]["dataset_root"] = "/scratch/training_data"
     (run / "resolved_config.yaml").write_text(yaml.safe_dump(saved))
     assert group_common.read_run(run)["group"]["dataset_root"] == "/scratch/training_data"
+
+
+@pytest.mark.parametrize("legacy_mode", ["synthetic", "tiny"])
+def test_legacy_framework_runs_cannot_be_loaded_as_real_policies(tmp_path, legacy_mode):
+    import yaml
+    from group_common import read_run
+    saved = {"schema_version": 1, "run_dir": str(tmp_path), "group": {},
+             "experiment": {legacy_mode: True}}
+    (tmp_path / "resolved_config.yaml").write_text(yaml.safe_dump(saved))
+    with pytest.raises(ValueError, match="no longer supported"):
+        read_run(tmp_path)

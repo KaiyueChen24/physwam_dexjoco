@@ -12,7 +12,7 @@
 - 每个任务配置语言指令、原始相机映射和可选 `episodes`（用于划分的候选 episode ID 列表）。
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
-- `local_smoke.yaml`：合成数据、batch 1、20 步、关闭 W&B 上传。
+- `pi05_smoke.yaml`：单张 H100 80GB、真实数据与 base 权重、全局 batch 1、20 步短跑。
 - `h100_lora.yaml`：真实数据、LoRA、全局 batch 32、60,000 步起点。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
 - 全局 batch 需整除可见 GPU 数量。`fsdp_devices=1` 为单机数据并行；更大的合法值开启参数分片。
@@ -24,7 +24,7 @@
 
 ## 留出验证集（仅计算 loss）
 
-`h100_lora.yaml` 和 `local_smoke.yaml` 已接入以下参数：
+`h100_lora.yaml` 和 `pi05_smoke.yaml` 已接入以下参数：
 
 ```yaml
 # 【验证 / validation：只计算 loss，不反向传播】
@@ -35,7 +35,7 @@ validation_batch_size: 8       # [验证/GPU] π0.5 所有 GPU 合计的 batch�
 validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；整数限制每任务的验证批次数
 ```
 
-本地 smoke 的验证间隔为 10、验证 batch 为 1；合成 episode 仅检查隔离与 loss 流程。
+H100 短跑使用验证间隔 10、验证 batch 1，每任务最多 2 批；正式 h100_lora 配方遍历完整验证集。
 真实数据按每任务的 episode 数向上取整，至少留一条验证和一条训练示范；不足两条时报错。
 例如每任务 100 条 episode，默认 90 条训练、10 条验证；episode 长短不一时帧数比例不保证恰为 9:1。
 同一任务在两个模型中采用相同的候选 episode、比例和种子时，得到相同划分。
@@ -59,44 +59,40 @@ validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；�
 验证不调用梯度或优化器更新，不消耗训练使用的噪声随机流，不运行模拟器。
 本功能仅记录 loss，不自动早停或选择最佳 checkpoint；动作成功率仍由独立闭环评测衡量。
 
-## 本地 smoke test
+## 单卡 H100 smoke test
+
+`pi05_smoke.yaml` 现为单卡 H100 80GB 的真实数据短跑配置。单臂六任务共享一个完整 π0.5 LoRA 模型，双臂五任务另跑一个模型。
+先准备所选任务组的全部数据和 base 权重；每个任务至少有两条候选 episode，才能划分训练和验证。
 
 ```bash
 conda activate openpi
 cd ~/physwam/dexjoco
 
-# 查看配置，不创建模型、不下载数据、不创建运行目录
+# 查看配置；不访问数据、不加载模型、不创建 run
 python scripts/smoke_train_pi05.py --group single_arm --dry-run
 
-# 完整 π0.5 LoRA：使用已经下载的 water_plant checkpoint 作为链路检查初始化
+# 需要时下载单臂数据和 base 权重，并按数据说明完成解压
+python scripts/prepare_group_data.py --group single_arm
+
+# 单张 H100：真实单臂六任务、20 次更新、两次验证，随后保存/恢复并再更新一步
 python scripts/smoke_train_pi05.py --group single_arm \
-  --run-name local_pi05_single_smoke --gpus 0
+  --run-name h100_single_smoke --gpus 0
 ```
 
-脚本检验：所有指标有限、可训练参数更新、checkpoint 保存、恢复状态完全一致、
-恢复后继续一步。结果写入 `runs/<run-name>/smoke_result.json`，日志写入 `train.log`。
-采用合成数据的权重不能用于报告任务性能；服务器正式训练从 base 重新初始化。
-已有 run 的 checkpoint 不会自动覆盖，每次重跑请换 run-name。
-
-双臂 smoke 需要 44 维初始化权重，可在需要时只下载权重：
+用 `--dataset-root /服务器/数据父目录` 指定外部数据盘；初始化目录可用 `--checkpoint /路径/params` 覆盖。
+单臂通过后，准备双臂五任务和 44 维 base 权重，在同一卡上依次检查：
 
 ```bash
-python scripts/prepare_group_data.py --group dual_arm --weights-only
+python scripts/prepare_group_data.py --group dual_arm
 python scripts/smoke_train_pi05.py --group dual_arm \
-  --run-name local_pi05_dual_smoke --gpus 0
+  --run-name h100_dual_smoke --gpus 0
 ```
 
-用于代码验证的较小模型模式：
-
-```bash
-python scripts/smoke_train_pi05.py --group single_arm --tiny --steps 2 \
-  --run-name framework_single_test --gpus 0
-python scripts/smoke_train_pi05.py --group dual_arm --tiny --steps 2 \
-  --run-name framework_dual_test --gpus 0
-```
-
-`--tiny` 使用 dummy 语言／动作模型并冻结 PaliGemma，仍调用同一个训练步和保存恢复逻辑。
-它仅验证框架，不证明完整 π0.5 的显存可用性。脚本会打印实际可见 GPU。
+脚本检查各任务数据和图像、训练指标有限、参数更新、留出集 loss、保存、恢复状态完全一致以及恢复后继续一步。
+结果位于 `runs/<name>/smoke_result.json`、`validation_loss.jsonl` 和 `train.log`。
+专用 smoke 在第 20、21 步保存；`save_interval: 10` 仅在通过 train_group.py 使用该配置时生效。
+`validation_max_batches: 2` 只检查每任务最多两帧，结果注明是否全量；512 帧的归一化估计也仅供短跑。
+正式训练请用独立 run-name 和 h100_lora.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
 
 ## 服务器准备与训练
 
@@ -187,7 +183,7 @@ python scripts/summarize_results.py \
 失败的 job 写入结果并使批量命令失败；重跑用 `--retry-failed`。
 已完成的 job 自动跳过。改变模型或评测设置时用新的 evaluation-name，避免混合结果。
 有缺失 job 时不报告任务平均值；仅评测任务子集时汇总标记 `all_group_tasks_evaluated: false`。
-合成／tiny checkpoint 必须显式允许才能服务和评测，汇总会标记不适合 benchmark。
+历史框架自测生成的权重不支持用于当前部署与评测。
 验证 checkpoint 与正式测试请使用不同 evaluation-name 和不同 seeds。
 
 ## 验证代码

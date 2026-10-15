@@ -55,6 +55,14 @@ def load_group(name):
     return group
 
 
+def require_real_data(config):
+    """拒绝旧框架测试配置；兼容历史真实数据快照中的 false 标记。"""
+    if config.get("synthetic") or config.get("tiny"):
+        raise ValueError("Legacy synthetic/tiny runs are no longer supported; use real LeRobot data and pi05_smoke.yaml")
+    for key in ("synthetic", "tiny", "synthetic_frames_per_task", "synthetic_episode_count"):
+        config.pop(key, None)
+
+
 def training_parser(description, default_experiment="h100_lora"):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--group", choices=("single_arm", "dual_arm"), required=True, help='[任务选择] 选择单臂或双臂任务组。')
@@ -69,7 +77,6 @@ def training_parser(description, default_experiment="h100_lora"):
     parser.add_argument("--fsdp-devices", type=int, help='[GPU 与并行] 每个参数分片组的 GPU 数；1 为不分片，须整除可见卡数。')
     parser.add_argument("--resume", action="store_true", help='[权重与结果保存] 从该实验最近的完整 checkpoint 恢复模型和优化器状态。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
-    parser.add_argument("--tiny", action="store_true", help='[训练] 仅对合成实验使用 dummy 小模型验证框架，不是完整 π0.5 训练。')
     return parser
 
 
@@ -86,11 +93,9 @@ def resolve(args):
         if value is not None:
             experiment[key] = value
     validation_settings(experiment)  # [验证/loss] 在访问数据或启动 GPU 前校验参数。
-    experiment["tiny"] = args.tiny
-    if args.tiny and not experiment["synthetic"]:
-        raise ValueError("--tiny requires a synthetic experiment")
+    require_real_data(experiment)
     for key in ("batch_size", "num_train_steps", "action_horizon", "fsdp_devices", "stats_samples",
-                "stats_batch_size", "log_interval", "save_interval", "synthetic_frames_per_task", "synthetic_episode_count"):
+                "stats_batch_size", "log_interval", "save_interval"):
         if key in experiment and experiment[key] <= 0:
             raise ValueError(f"{key} must be positive")
     if experiment["num_workers"] < 0 or experiment["warmup_steps"] < 0:
@@ -101,13 +106,11 @@ def resolve(args):
         raise ValueError("stats_samples must cover all tasks")
     group["dataset_root"] = str(repo_path(args.dataset_root or experiment.get("dataset_root")
                                          or group["dataset_root"]))
-    for key in ("synthetic", "sampling", "seed", "video_backend", "synthetic_frames_per_task", "synthetic_episode_count"):
+    for key in ("sampling", "seed", "video_backend"):
         if key in experiment:
             group[key] = experiment[key]
     checkpoint = args.checkpoint or experiment["checkpoint_paths"][group["name"]]
     experiment["initialization_params"] = str(repo_path(checkpoint))
-    if args.tiny:
-        experiment["initialization_params"] = None
     run_name = args.run_name or f"pi05_{args.group}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     if Path(run_name).name != run_name or run_name in (".", ".."):
         raise ValueError("run-name must be a simple directory name")
@@ -136,10 +139,9 @@ def build_train_config(resolved, resume=False):
     from openpi.models.pi0_config import Pi0Config
     from openpi.training import config as cfg, optimizer, weight_loaders
     from openpi.training.dexjoco_multitask import make_data_factory
-    from openpi.shared import nnx_utils
 
     group, exp = resolved["group"], resolved["experiment"]
-    tiny = exp.get("tiny", False)
+    require_real_data(exp)
     validation = None
     if resolved.get("validation_group"):
         options = validation_settings(exp)
@@ -148,17 +150,16 @@ def build_train_config(resolved, resume=False):
     # [模型/LoRA] 语言侧 rank=16、alpha=16；动作侧 rank=32、alpha=32，定义在 gemma.py。
     model = Pi0Config(pi05=True, action_dim=group["model_action_dim"],
                       action_horizon=exp["action_horizon"], max_token_len=exp["max_token_len"],
-                      paligemma_variant="dummy" if tiny else "gemma_2b_lora",
-                      action_expert_variant="dummy" if tiny else "gemma_300m_lora")
-    loader = (weight_loaders.NoOpWeightLoader() if tiny else
-              weight_loaders.CheckpointWeightLoader(exp["initialization_params"]))
+                      paligemma_variant="gemma_2b_lora",
+                      action_expert_variant="gemma_300m_lora")
+    loader = weight_loaders.CheckpointWeightLoader(exp["initialization_params"])
     run_dir = Path(resolved["run_dir"])
     return cfg.TrainConfig(
         name=f"pi05_{group['name']}_multitask", exp_name=resolved["run_name"], validation=validation,
         model=model, data=make_data_factory(group), weight_loader=loader,
-        # [训练/冻结] 正式模式沿用模型过滤器，视觉编码器仍可训练；tiny 冻结整个 PaliGemma。
+        # [训练/冻结] 沿用模型的 LoRA 过滤器，视觉编码器仍可训练。
         # [训练/EMA] ema_decay=None 关闭参数指数移动平均。
-        freeze_filter=nnx_utils.PathRegex("PaliGemma/.*") if tiny else model.get_freeze_filter(), ema_decay=None,
+        freeze_filter=model.get_freeze_filter(), ema_decay=None,
         # [训练/学习率] 预热后保持常数：peak_lr 与 decay_lr 使用同一个 YAML 值。
         lr_schedule=optimizer.CosineDecaySchedule(
             warmup_steps=exp["warmup_steps"], peak_lr=exp["learning_rate"],
@@ -173,7 +174,7 @@ def build_train_config(resolved, resume=False):
         assets_base_dir=str(run_dir / "assets"), checkpoint_base_dir=str(run_dir / "checkpoints"),
         policy_metadata={"group": group["name"], "robot_type": group["robot_type"],
                          "tasks": [t["name"] for t in group["tasks"]],
-                         "synthetic": bool(exp["synthetic"]), "tiny": tiny,
+                         "data_source": "lerobot",
                          "action_horizon": exp["action_horizon"]},
     )
 
@@ -186,15 +187,15 @@ def load_trainer():
     return module
 
 
-def validate_gpu(config, tiny=False):
+def validate_gpu(config):
     import jax
     devices = jax.devices()
     print("Devices:", devices, flush=True)
-    if not tiny and not all(d.platform == "gpu" for d in devices):
+    if not all(d.platform == "gpu" for d in devices):
         raise RuntimeError("Full pi05 training requires visible GPU devices")
     if config.batch_size % len(devices) or len(devices) % config.fsdp_devices:
         raise ValueError("Global batch and fsdp_devices must divide the visible GPU layout")
-    if not tiny and not config.resume and not Path(config.weight_loader.params_path).is_dir():
+    if not config.resume and not Path(config.weight_loader.params_path).is_dir():
         raise FileNotFoundError(f"Initialization checkpoint missing: {config.weight_loader.params_path}")
 
 
@@ -259,6 +260,10 @@ def latest_checkpoint(config):
 def read_run(run_dir):
     run_dir = repo_path(run_dir)
     resolved = read_yaml(run_dir / "resolved_config.yaml")
+    require_real_data(resolved["experiment"])
+    require_real_data(resolved["group"])
+    if resolved.get("validation_group"):
+        require_real_data(resolved["validation_group"])
     origin_root = Path(resolved["run_dir"]).parent.parent
     # Relocate only paths originally inside the source checkout. External data paths stay explicit.
     containers = [(resolved["group"], "dataset_root"),

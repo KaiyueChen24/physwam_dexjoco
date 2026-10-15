@@ -71,16 +71,6 @@ def test_bad_validation_settings_fail_before_training(change):
         validation_settings(change)
 
 
-def test_synthetic_train_and_validation_never_generate_the_same_source_frames(tmp_path):
-    group = {**make_group(tmp_path, (8,)), "synthetic": True, "synthetic_frames_per_task": 64,
-             "synthetic_episode_count": 8}
-    train, val, _ = split_group(group, validation_settings({"validation_ratio": 0.1}))
-    a, b = train["tasks"][0]["synthetic_indices"], val["tasks"][0]["synthetic_indices"]
-    assert not set(a) & set(b)
-    assert sorted(a + b) == list(range(64))
-    assert len(b) == 8
-
-
 def test_real_v3_split_stats_and_video_reader_exclude_validation_episodes(tmp_path):
     from test_fastwam_framework import make_dataset
     from experiments.dexjoco.data import compute_stats

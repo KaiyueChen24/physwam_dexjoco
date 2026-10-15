@@ -1,4 +1,4 @@
-"""Train, save, restore, then continue pi05 on synthetic task-group data."""
+"""Train, validate, save, restore, then continue pi05 on real LeRobot task-group data."""
 import contextlib
 import json
 import logging
@@ -19,11 +19,9 @@ def run_smoke(config, resolved):
 
     trainer = load_trainer()
     logging.basicConfig(level=logging.INFO, force=True)
-    if not resolved["experiment"]["synthetic"]:
-        raise ValueError("Smoke entry point requires synthetic data")
     if config.checkpoint_dir.exists():
         raise FileExistsError("Use a new run-name for smoke; existing checkpoints are preserved")
-    validate_gpu(config, resolved["experiment"].get("tiny", False))
+    validate_gpu(config)
     dataset = prepare_data(config, resolved, check_images=True)
     compute_stats(config, resolved, dataset)
     del dataset
@@ -81,8 +79,8 @@ def run_smoke(config, resolved):
     finally:
         manager.close()
     result = {"passed": True, "group": resolved["group"]["name"],
-              "model": "dummy framework test" if resolved["experiment"].get("tiny") else "full pi05 LoRA",
-              "synthetic": True, "steps_before_restore": config.num_train_steps,
+              "model": "full pi05 LoRA",
+              "data_source": "lerobot", "steps_before_restore": config.num_train_steps,
               "step_after_restore": int(restored.step), "max_parameter_update": delta,
               "metrics": records, "continuation_metrics": continuation,
               "checkpoint_dir": str(config.checkpoint_dir)}
@@ -91,7 +89,7 @@ def run_smoke(config, resolved):
 
 
 def main():
-    parser = training_parser(__doc__, default_experiment="local_smoke")
+    parser = training_parser(__doc__, default_experiment="pi05_smoke")
     args = parser.parse_args()
     resolved = resolve(args)
     if args.resume:
@@ -102,7 +100,7 @@ def main():
     resolve_training_split(resolved)
     config = build_train_config(resolved)
     # Fail before creating run artifacts if the full-model checkpoint/GPU is absent.
-    validate_gpu(config, args.tiny)
+    validate_gpu(config)
     run_dir = write_run(resolved)
     with (run_dir / "train.log").open("a", buffering=1) as log:
         with contextlib.redirect_stdout(Tee(sys.stdout, log)), contextlib.redirect_stderr(Tee(sys.stderr, log)):

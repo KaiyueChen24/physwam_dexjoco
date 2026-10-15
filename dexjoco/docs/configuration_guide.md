@@ -22,7 +22,7 @@
 主要配置已逐字段标注：
 
 - `configs/experiments/h100_lora.yaml`：π0.5 正式训练。
-- `configs/experiments/local_smoke.yaml`：π0.5 合成数据流程检查。
+- `configs/experiments/pi05_smoke.yaml`：单张 H100 80GB、真实数据的 π0.5 短跑。
 - `configs/experiments/fastwam_baseline.yaml`：FastWAM 训练与推理起始配方。
 - `configs/task_groups/{single_arm,dual_arm}.yaml`：两组共享的任务与数据契约。
 - `configs/{rand_obj,rand_full,multi_task,ipad_reasoning}/*.yaml`：仿真环境与语言指令。
@@ -62,7 +62,7 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 | 入口 | 关键参数与用途 |
 |---|---|
 | `scripts/train_group.py` | `--group`、`--experiment`、`--run-name`、`--gpus`；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
-| `scripts/smoke_train_pi05.py` | 使用相同训练参数入口，默认读取 local_smoke；`--tiny` 仅检查 dummy 框架；脚本自身测试恢复，不接受 `--resume` |
+| `scripts/smoke_train_pi05.py` | 默认读取 H100 真实数据 pi05_smoke；脚本自身测试恢复，不接受 --resume |
 | `scripts/train_fastwam_group.py` | `--stage prepare/inspect/initialize/train`；`--tasks` 可选子集；`--mode joint/per_task`；`--resume` 必须指向完整训练状态目录 |
 | `scripts/prepare_group_data.py` | `--group`、`--data-only`、`--weights-only`、`--data-revision`、`--model-revision`；权重下载针对 π0.5 |
 
@@ -77,7 +77,6 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 | `--gpus` | GPU/部署 | 部署进程可见的显卡编号 |
 | `--host` | 部署/连接 | 服务端为监听地址；评测端为要连接的服务器地址 |
 | `--port` | 部署/连接 | π0.5 默认 8000，FastWAM 默认 8001 |
-| `--allow-smoke-checkpoint` | 评测/检查 | 允许 π0.5 合成/tiny 权重验证链路，不用于正式成绩 |
 
 评测使用 `scripts/evaluate_group.py` 或 `scripts/evaluate_fastwam_group.py`：
 
@@ -145,7 +144,6 @@ FastWAM 的 `experiments/dexjoco/config.py::build_config` 从官方 `configs/tra
 | `validation_interval` | 验证/频率 | 每多少次优化器更新验证一次，正式训练默认 1000，最后一次更新也验证 |
 | `validation_batch_size` | 验证/GPU | π0.5 为全局 batch（默认 8）；FastWAM 为每卡 batch（默认 1），不做梯度累积 |
 | `validation_max_batches` | 验证/预算 | null 遍历全部；整数限制每任务的批次数，固定抽帧并标注是否全量 |
-| `synthetic_episode_count` | 数据/合成 | 本地 smoke 每任务的合成 episode 数，默认 8；只用于测试划分隔离 |
 
 任务组的 `episodes` 现在表示划分候选：null 使用全部示范，列表先限制候选，再留出验证部分。
 真实数据不足两条候选 episode 时无法同时保留训练和验证，会报错；不会偷偷把训练数据用于验证。

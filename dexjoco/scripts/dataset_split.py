@@ -56,13 +56,8 @@ def split_group(group, settings):
     validation["sampling"] = "frame_uniform"  # 验证逐帧遍历，不进行任务重采样。
     records = []
     for source, train_task, val_task in zip(group["tasks"], train["tasks"], validation["tasks"], strict=True):
-        if group.get("synthetic", False):
-            frames = int(group["synthetic_frames_per_task"])
-            count = min(int(group.get("synthetic_episode_count", 8)), frames)
-            all_ids = list(range(count))
-        else:
-            root = source.get("dataset_path") or Path(group["dataset_root"]) / source["dataset"]
-            all_ids = available_episodes(root)
+        root = source.get("dataset_path") or Path(group["dataset_root"]) / source["dataset"]
+        all_ids = available_episodes(root)
         requested = source.get("episodes")
         ids = all_ids if requested is None else sorted(requested)
         if (not ids or len(ids) != len(set(ids)) or any(type(i) is not int for i in ids)
@@ -78,10 +73,6 @@ def split_group(group, settings):
         val_ids = sorted(shuffled[:n_val])
         train_ids = sorted(shuffled[n_val:])
         train_task["episodes"], val_task["episodes"] = train_ids, val_ids
-        if group.get("synthetic", False):
-            # 合成 episode 仅用于测试；索引沿用原帧号，避免 train/val 生成同一数据。
-            for target, selection in ((train_task, train_ids), (val_task, val_ids)):
-                target["synthetic_indices"] = [i for i in range(frames) if i * count // frames in selection]
         records.append({"task": source["name"], "source_episodes": ids,
                         "train_episodes": train_ids, "validation_episodes": val_ids,
                         "source_count": len(ids), "train_count": len(train_ids), "validation_count": len(val_ids)})

@@ -55,7 +55,6 @@ def main():
     parser.add_argument("--evaluation-name", default="rand_obj", help='[闭环评测] 本次评测结果子目录名；仅命名，不会自动切换随机化。')
     parser.add_argument("--timeout", type=float, default=7200, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
-    parser.add_argument("--allow-smoke-checkpoint", action="store_true", help='[闭环评测] 允许合成或 tiny 权重用于流程检查，不能用于报告正式成绩。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
     if args.episodes <= 0 or args.timeout <= 0 or len(args.seeds) != len(set(args.seeds)):
@@ -86,7 +85,7 @@ def main():
         raise ValueError("Server is serving a different group/run; start serve_group.py for this run")
     if metadata.get("action_horizon") != 30:
         raise ValueError("The current DexJoCo evaluator requires action_horizon=30")
-    if (metadata.get("synthetic") or metadata.get("tiny")) and not args.allow_smoke_checkpoint:
+    if metadata.get("synthetic") or metadata.get("tiny"):
         raise ValueError("Synthetic/tiny checkpoints cannot be used for benchmark reporting")
     evaluation_dir = Path(resolved["run_dir"]) / "evaluation" / args.evaluation_name
     evaluation_dir.mkdir(parents=True, exist_ok=True)
@@ -126,7 +125,7 @@ def main():
                    "--output", str(output), "--metrics-output", str(latency_path),
                    "--render-mode", "rgb_array"]
         result = {**job, "group": group["name"], "checkpoint": metadata["checkpoint"],
-                  "synthetic": metadata.get("synthetic", False), "tiny": metadata.get("tiny", False),
+                  "data_source": "lerobot",
                   "command": command, "output": str(output), "status": "failed"}
         print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)
         try:

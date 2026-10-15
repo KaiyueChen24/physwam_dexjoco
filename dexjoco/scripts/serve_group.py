@@ -14,14 +14,11 @@ def main():
     parser.add_argument("--gpus", default="0", help='[GPU 与并行] 可见 GPU 编号，逗号分隔，例如 0,1；不是 GPU 数量。')
     parser.add_argument("--host", default="127.0.0.1", help='[部署与连接] 服务监听地址；127.0.0.1 为本机，0.0.0.0 监听所有接口。')
     parser.add_argument("--port", type=int, default=8000, help='[部署与连接] 策略服务端口。')
-    parser.add_argument("--allow-smoke-checkpoint", action="store_true", help='[闭环评测] 允许合成或 tiny 权重用于流程检查，不能用于报告正式成绩。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     resolved = read_run(args.run_dir)
-    if (resolved["experiment"]["synthetic"] or resolved["experiment"].get("tiny")) and not args.allow_smoke_checkpoint:
-        parser.error("Synthetic/tiny checkpoint is for pipeline testing; use --allow-smoke-checkpoint explicitly")
     config = build_train_config(resolved)
     checkpoint = repo_path(args.checkpoint) if args.checkpoint else latest_checkpoint(config)
     if not (checkpoint / "params").is_dir() or not (checkpoint / "assets").is_dir():

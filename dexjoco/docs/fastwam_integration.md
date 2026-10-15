@@ -237,5 +237,5 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/test_fastwam_framewor
 ```
 
 测试包含单／双臂维度、配置解析、官方归一化一致性、所选 episode 统计隔离、
-真实合成 MP4/Parquet 的官方 v3 reader 边界检查、任务均衡、模拟模型推理后处理、
+临时 MP4/Parquet 测试夹具的官方 v3 reader 边界检查、任务均衡、模拟模型推理后处理、
 同步重规划与旧 episode 响应拒绝。它们不替代 GPU 训练与真实任务性能评测。

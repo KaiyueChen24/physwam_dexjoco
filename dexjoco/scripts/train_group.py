@@ -15,7 +15,7 @@ def prepare_data(config, resolved, check_images=False):
     from openpi.training.dexjoco_multitask import MultiTaskDataset
 
     dataset = MultiTaskDataset(resolved["group"], config.model.action_horizon)
-    manifest = {"group": resolved["group"]["name"], "synthetic": dataset.synthetic,
+    manifest = {"group": resolved["group"]["name"], "data_source": "lerobot",
                 "sampling": resolved["experiment"]["sampling"], "tasks": dataset.manifest,
                 "normalization": "seeded frame sampling using the training task mixture; training episodes only",
                 "data_split": resolved.get("data_split")}
@@ -66,7 +66,7 @@ def main():
     resolve_training_split(resolved)
     config = build_train_config(resolved, args.resume)
     if args.stage == "train":
-        validate_gpu(config, resolved["experiment"].get("tiny", False))
+        validate_gpu(config)
         if config.checkpoint_dir.exists() and not args.resume:
             raise FileExistsError("Training run already has checkpoints; use --resume or another run-name")
     run_dir = write_run(resolved)

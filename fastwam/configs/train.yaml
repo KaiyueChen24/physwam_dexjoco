@@ -1,0 +1,79 @@
+# @package _global_
+
+# [配置/Hydra] 基础配置组合；分组构造器随后写入实际 data/model，并移除 defaults。
+defaults:
+  - _self_
+  - data: null
+  - model: null
+  - task: null
+
+
+# [保存/路径] 输出根目录；DexJoCo 分组入口覆盖为 runs/<run-name>/。
+output_dir: ./runs/train/${now:%Y-%m-%d}_${now:%H-%M-%S}
+
+# dataloading
+# [训练/批次] 每张 GPU 的样本数；分组入口从实验 YAML 覆盖。
+batch_size: 2
+# [数据/CPU] 每个训练进程的数据加载工作进程数。
+num_workers: 4
+
+# scheduler
+# [训练/学习率] cosine 为余弦衰减，constant 为恒定；当前训练器统一预热总步数的 5%。
+lr_scheduler_type: "cosine"
+# [训练/优化] 优化器的目标学习率；分组入口从实验 YAML 覆盖。
+learning_rate: 1.0e-4
+# [训练/预算] 仅在 max_steps 为 null 时用于估算总更新步数；分组入口设 100000。
+num_epochs: 1
+# [训练/预算] 非 null 时优先决定总优化器更新次数；分组入口从实验 YAML 覆盖。
+max_steps: null
+# [日志/频率] 记录训练指标的更新步间隔。
+log_every: 10
+# [保存/频率] 保存策略权重和训练状态的更新步间隔。
+save_every: 100
+# [评测/训练内置] 视频评测间隔；DexJoCo 分组入口强制为 0，使用独立闭环评测。
+eval_every: 50
+# [评测/训练内置] 内置视频评测的采样迭代次数；eval_every=0 时不使用。
+eval_num_inference_steps: 10
+
+# training
+# [训练/梯度累积] 累积的微批次数；有效全局 batch=每卡 batch×卡数×累积次数。
+gradient_accumulation_steps: 1
+# [GPU/精度] 混合精度 bf16、fp16 或字符串 "no"。
+mixed_precision: "bf16" # one of: [no, fp16, bf16]
+# [训练/随机性] 模型与采样的随机种子。
+seed: 42
+# [训练/梯度裁剪] 全局梯度范数上限。
+max_grad_norm: 1.0
+# [训练/优化] AdamW 权重衰减系数；分组入口从实验 YAML 覆盖。
+weight_decay: 0.0
+# [保存/恢复] 官方完整训练状态目录；由 --resume 显式传入。
+resume: null
+
+# wandb
+# [日志/在线记录] W&B 记录设置。
+wandb:
+  # [日志/开关] 是否启用 W&B；分组入口从实验 YAML 覆盖。
+  enabled: false
+  # [日志/账号] W&B 用户或团队 entity；null 使用默认账号。
+  workspace: null
+  # [日志/项目] W&B 项目名。
+  project: fast-wam
+  # [日志/名称] W&B 运行显示名，不是 DexJoCo 的 run-name。
+  name: train
+  # [日志/分组] W&B 运行分组，null 不指定。
+  group: null
+  # [日志/模式] online 联网上传；offline 为离线记录。
+  mode: online
+
+# [配置/Hydra] 配置运行时行为。
+hydra:
+  # [配置/Hydra] 启动任务相关设置。
+  job:
+    # [配置/工作目录] false 保持启动目录不变。
+    chdir: false
+  # [配置/Hydra] Hydra 自身运行目录设置。
+  run:
+    # [配置/路径] Hydra 运行目录；实际模型输出仍由 output_dir 控制。
+    dir: .
+  # [配置/快照] null 不创建 Hydra 的额外配置子目录。
+  output_subdir: null

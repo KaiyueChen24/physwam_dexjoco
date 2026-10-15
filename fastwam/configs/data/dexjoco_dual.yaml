@@ -1,0 +1,34 @@
+# DexJoCo 数据适配模板：scripts/train_fastwam_group.py 会写入实验快照。
+
+# [数据/训练集] 由分组入口填入实际任务与路径。
+train:
+  # [配置/Hydra] 数据集构造类的完整 Python 路径。
+  _target_: experiments.dexjoco.dataset.DexJoCoVideoDataset
+  # [配置/Hydra] false 表示不提前递归实例化嵌套配置。
+  _recursive_: false
+  # [任务组] 入口写入所选任务、相机映射、路径与 episode 选择。
+  tasks: []
+  # [数据/状态维度] 原始状态长度，不使用 π0.5 padding。
+  state_dim: 46
+  # [数据/动作维度] 原始动作长度，单臂 22、双臂 44。
+  action_dim: 44
+  # [模型/动作序列] 一次预测的动作步数，由实验 YAML 覆盖。
+  action_horizon: 32
+  # [数据/视频采样] 相邻训练视频帧间隔的动作步数。
+  video_stride: 4
+  # [数据/相机] 策略输入相机的固定排列顺序。
+  camera_order: [base, wrist_left, wrist_right]
+  # [数据/图像] 每个相机目标 [高, 宽]，两者须为 16 的倍数。
+  image_size: [224, 224]
+  # [数据/采样] task_balanced 任务均衡或 frame_uniform 原始帧连接。
+  sampling: task_balanced
+  # [归一化/路径] 入口写入本次实验的精确 min/max 统计 JSON。
+  stats_path: null
+  # [数据/频率] 动作采样频率（Hz），必须匹配数据 fps。
+  control_hz: 30
+  # [数据/维度契约] 供官方模型配置引用的动作与状态输出维度。
+  processor:
+    # [数据/动作维度] 适配后动作长度，不补齐到 32。
+    action_output_dim: 44
+    # [数据/状态维度] 适配后本体状态长度。
+    proprio_output_dim: 46

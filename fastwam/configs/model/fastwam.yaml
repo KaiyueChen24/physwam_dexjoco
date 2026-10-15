@@ -1,0 +1,113 @@
+# [配置/Hydra] 官方 FastWAM 模型构造函数。
+_target_: fastwam.runtime.create_fastwam
+# [初始化/基础模型] Wan 视频模型的 Hugging Face 标识。
+model_id: Wan-AI/Wan2.2-TI2V-5B
+# [初始化/分词器] 文本 tokenizer 的模型标识。
+tokenizer_model_id: Wan-AI/Wan2.1-T2V-1.3B
+# [模型/文本] 文本 tokenizer 长度上限，不是图像或动作序列长度。
+tokenizer_max_len: 128
+# [模型/文本] 是否加载 T5；DexJoCo 分组入口覆盖为 true，用于在线编码指令。
+load_text_encoder: false
+# [模型/状态] 本体状态维度，由任务组覆盖。
+proprio_dim: ${data.train.processor.proprio_output_dim}
+# [初始化/缓存] 是否使用官方公共文件重定向机制加载模型组件。
+redirect_common_files: true
+# [GPU/显存] 混合注意力梯度检查点开关；分组入口取 gradient_checkpointing。
+mot_checkpoint_mixed_attn: false
+# [GPU/编译] 是否编译训练去噪路径；DexJoCo 分组入口固定 false。
+compile_training_denoise: false
+# [初始化/动作骨干] 官方预处理得到的 ActionDiT 权重路径，不是训练后的完整策略。
+action_dit_pretrained_path: checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt
+# [初始化/加载] 是否跳过从预训练组件加载 DiT。
+skip_dit_load_from_pretrain: false
+
+# [模型/视频分支] 官方视频 DiT 结构，与初始化权重形状绑定。
+video_dit_config:
+  # [模型/结构] 视频分支的图像输入结构标志。
+  has_image_input: false
+  # [模型/结构] 时空 patch 大小。
+  patch_size: [1, 2, 2]
+  # [模型/结构] 视频 latent 输入通道数。
+  in_dim: 48
+  # [模型/结构] 分支隐藏特征维度。
+  hidden_dim: 3072
+  # [模型/结构] 前馈网络的中间特征维度。
+  ffn_dim: 14336
+  # [模型/结构] 时间步频率编码维度。
+  freq_dim: 256
+  # [模型/结构] 文本条件特征维度。
+  text_dim: 4096
+  # [模型/结构] 视频 latent 输出通道数。
+  out_dim: 48
+  # [模型/注意力] 注意力头数。
+  num_heads: 24
+  # [模型/注意力] 每个注意力头的维度。
+  attn_head_dim: 128
+  # [模型/结构] Transformer 层数。
+  num_layers: 30
+  # [模型/数值稳定] 归一化使用的 epsilon。
+  eps: 1.0e-06
+  # [模型/时间条件] 是否使用分离的时间步条件；键名沿用官方拼写。
+  seperated_timestep: true
+  # [模型/条件] 是否要求 CLIP 图像 embedding。
+  require_clip_embedding: false
+  # [模型/条件] 是否要求额外 VAE embedding。
+  require_vae_embedding: false
+  # [模型/条件] 是否在 latent 中融合 VAE embedding。
+  fuse_vae_embedding_in_latents: true
+  # [GPU/显存] 梯度检查点开关；分组入口在两个分支均从实验 YAML 覆盖。
+  use_gradient_checkpointing: ${model.mot_checkpoint_mixed_attn}
+  # [模型/注意力] 视频分支的注意力掩码模式。
+  video_attention_mask_mode: "first_frame_causal" # default
+  # [模型/条件] 视频分支是否使用显式动作条件。
+  action_conditioned: false
+  # [模型/动作维度] 分组入口覆盖为原始动作维度，单臂 22、双臂 44。
+  action_dim: ${data.train.processor.action_output_dim}
+  # [模型/注意力] 动作组之间的因果掩码模式。
+  action_group_causal_mask_mode: "group_diagonal"
+
+# [模型/动作分支] 官方动作 DiT 结构，与初始化权重形状绑定。
+action_dit_config:
+  # [模型/动作维度] 分组入口覆盖为原始动作维度，单臂 22、双臂 44。
+  action_dim: ${data.train.processor.action_output_dim}
+  # [模型/结构] 分支隐藏特征维度。
+  hidden_dim: 1024
+  # [模型/结构] 前馈网络的中间特征维度。
+  ffn_dim: 4096
+  # [模型/注意力] 注意力头数。
+  num_heads: 24
+  # [模型/注意力] 每个注意力头的维度。
+  attn_head_dim: 128
+  # [模型/结构] Transformer 层数。
+  num_layers: 30
+  # [模型/结构] 文本条件特征维度。
+  text_dim: 4096
+  # [模型/结构] 时间步频率编码维度。
+  freq_dim: 256
+  # [模型/数值稳定] 归一化使用的 epsilon。
+  eps: 1.0e-06
+  # [GPU/显存] 梯度检查点开关；分组入口在两个分支均从实验 YAML 覆盖。
+  use_gradient_checkpointing: ${model.mot_checkpoint_mixed_attn}
+
+# [模型/视频噪声调度] 视频分支的训练与推理调度参数。
+video_scheduler:
+  # [训练/噪声调度] 对应分支训练时的时间分布偏移。
+  train_shift: 5.0
+  # [推理/噪声调度] 对应分支默认的推理调度偏移；DexJoCo 动作服务还显式传 sigma_shift。
+  infer_shift: 5.0
+  # [训练/噪声调度] 噪声调度的训练时间步数量，不是优化器更新总步数。
+  num_train_timesteps: 1000
+
+# [模型/动作噪声调度] 动作分支的训练与推理调度参数。
+action_scheduler:
+  # [训练/噪声调度] 对应分支训练时的时间分布偏移。
+  train_shift: 1.0
+  # [推理/噪声调度] 对应分支默认的推理调度偏移；DexJoCo 动作服务还显式传 sigma_shift。
+  infer_shift: 1.0
+  # [训练/噪声调度] 噪声调度的训练时间步数量，不是优化器更新总步数。
+  num_train_timesteps: 1000
+
+# [训练/损失] 损失函数权重设置。
+loss:
+  # [训练/损失] 动作损失的权重。
+  lambda_action: 1.0

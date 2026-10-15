@@ -1,141 +1,119 @@
-# dexjoco
+# physwam_dexjoco
 
-This package contains the core DexJoCo runtime, including MuJoCo simulation
-environments, task configuration classes, demonstration recording and replay
-utilities, and the OpenPI evaluation client used for policy rollouts.
+<p align="center">
+  <img src="docs/pics/dexjoco_logo.jpg" alt="dexjoco logo" height="110">
+</p>
 
-Package layout:
+<p align="center">
+  <a href="https://arxiv.org/abs/2605.16257"><img src="https://img.shields.io/badge/arXiv-2605.16257-b31b1b?style=flat-square" alt="arXiv"></a>
+  <a href="https://dexjoco.github.io/"><img src="https://img.shields.io/badge/GitHub-Page-FF6B00?style=flat-square&logo=github&logoColor=white" alt="Project Homepage"></a>
+  <a href="https://huggingface.co/datasets/DexJoCo/DexJoCo-Datasets-LeRobot"><img src="https://img.shields.io/badge/🤗%20HF-Dataset-FFD21E?style=flat-square" alt="HF Dataset"></a>
+  <a href="https://huggingface.co/DexJoCo/DexJoCo-Pi05"><img src="https://img.shields.io/badge/🤗%20HF-Model-FFD21E?style=flat-square" alt="HF Models"></a>
+  <a href="https://huggingface.co/papers/2605.16257"><img src="https://img.shields.io/badge/🤗%20HF-Paper-FFD21E?style=flat-square" alt="HF Paper"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License"></a>
+</p>
 
-| Path                     | Description                                                                       |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `dexjoco/tasks/`         | Task configuration classes and task-specific environment setup.                   |
-| `dexjoco/sim/`           | MuJoCo simulation wrappers, controllers, and XML assets.                          |
-| `dexjoco/data/`          | Zarr episode storage, video writing, depth capture, and replay support utilities. |
-| `dexjoco_openpi_client/` | OpenPI evaluation client for DexJoCo policy rollout.                              |
+---
 
-## Installation
+DexJoCo is a MuJoCo-based simulation benchmark and toolkit for task-oriented
+dexterous manipulation. It provides **11 functionally grounded tasks** covering
+🛠️ **tool use**, 🤝 **bimanual coordination**, ⏱️ **long-horizon execution**,
+and ⚙️ **reasoning**, together with a low-cost teleoperation data collection
+system, replayable demonstrations, domain randomization, and OpenPI π0.5 policy
+training/evaluation support.
 
-From the repository root:
+<table width="100%">
+  <tr>
+    <td align="center" width="20%">
+      <img src="docs/pics/photograph_4.png" alt="Bimanual photograph" width="100%">
+      <br><sub>Bimanual photograph</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="docs/pics/ipad_2.png" alt="Bimanual unlock iPad" width="100%">
+      <br><sub>Bimanual unlock iPad</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="docs/pics/assembly_3.png" alt="Bimanual assembly" width="100%">
+      <br><sub>Bimanual assembly</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="docs/pics/hanoi_3.png" alt="Bimanual hanoi" width="100%">
+      <br><sub>Bimanual hanoi</sub>
+    </td>
+    <td align="center" width="20%">
+      <img src="docs/pics/microwave_2.png" alt="Bimanual microwave" width="100%">
+      <br><sub>Bimanual microwave</sub>
+    </td>
+  </tr>
+</table>
+
+<table width="100%">
+  <tr>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/water_plant_4.png" alt="Water plant" width="100%">
+      <br><sub>Water plant</sub>
+    </td>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/hammer_3.png" alt="Hammer nail" width="100%">
+      <br><sub>Hammer nail</sub>
+    </td>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/glass_1.png" alt="Fold glasses" width="100%">
+      <br><sub>Fold glasses</sub>
+    </td>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/tongs_3.png" alt="Pinch tongs" width="100%">
+      <br><sub>Pinch tongs</sub>
+    </td>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/bucket_4.png" alt="Pick bucket" width="100%">
+      <br><sub>Pick bucket</sub>
+    </td>
+    <td align="center" width="16.66%">
+      <img src="docs/pics/mouse_3.png" alt="Click mouse" width="100%">
+      <br><sub>Click mouse</sub>
+    </td>
+  </tr>
+</table>
+
+## Table of Contents
+
+- [Installation](#-installation)
+- [Policy Evaluation](#-policy-evaluation)
+- [Custom Policy Integration](#-custom-policy-integration)
+- [Data Collection](#-data-collection)
+- [Demonstration Replay](#-demonstration-replay)
+- [Data Format](#data-format)
+- [Data Conversion](#data-conversion)
+- [Policy Training](#policy-training)
+- [Headless Rendering](#headless-rendering)
+- [License](#-license)
+- [Citation](#-citation)
+
+## 🚀 Installation
+
+Create and activate the DexJoCo environment:
 
 ```bash
 conda env create -f environment-dexjoco.yaml
 conda activate dexjoco
 ```
 
-### Test the Installation
-
-Run the interactive environment test from the repository root:
+OpenPI training and serving environment
 
 ```bash
-python scripts/test_envs.py
+cd openpi
+bash install.bash
+conda activate openpi
 ```
 
-Run the headless rendering test with EGL:
+## 🤖 Policy Evaluation
 
-```bash
-python scripts/test_headless_envs.py
-```
+Download model checkpoints from
+[DexJoCo-Pi05](https://huggingface.co/DexJoCo/DexJoCo-Pi05) or train them
+yourself before evaluation.
 
-Both scripts iterate over the registered DexJoCo task configurations and step
-each environment with zero actions. The headless test writes rendered videos to
-`test_headless_videos/`.
-
-Registered task names:
-
-```text
-bimanual_assembly
-bimanual_hanoi
-bimanual_microwave_cook
-bimanual_photograph
-bimanual_unlock_ipad
-click_mouse
-fold_glasses
-hammer_nail
-pick_bucket
-pinch_tongs
-water_plant
-```
-
-## Explore the Environments
-
-Use the top-level demo collection tool for interactive teleoperation data
-collection:
-
-```bash
-python scripts/record_demos_zarr.py --exp_name water_plant
-```
-
-The `--exp_name` value must match a registered task name. Interactive collection
-uses the MuJoCo viewer and the task's teleoperation wrapper.
-
-Recorded demonstrations can be replayed through the policy interface:
-
-```bash
-python scripts/replay_demos_zarr.py \
-  --exp_name=water_plant \
-  --input_dir=./demos \
-  --out_dir=./replay_output \
-  --randomize=True \
-  --restore_state=True
-```
-
-Replay reads input folders containing `replay.zarr`, restores the recorded
-initial scene state when available, executes the saved action sequence, and
-writes replayed Zarr episodes and videos to the output directory. With
-`--randomize=True`, replay can generate `rand_full` visual variants using preset
-cameras, lighting, and texture randomization.
-
-Common replay options:
-
-| Option            | Default           | Description                                                                             |
-| ----------------- | ----------------- | --------------------------------------------------------------------------------------- |
-| `--exp_name`      | `water_plant`     | Selects the task used to replay demonstrations.                                         |
-| `--input_dir`     | `./`              | Directory containing recorded demo folders with `replay.zarr`.                          |
-| `--out_dir`       | `./replay_output` | Output directory for replayed Zarr episodes and videos.                                 |
-| `--randomize`     | `True`            | Enables replay-time `rand_full` visual randomization.                                   |
-| `--restore_state` | `True`            | Restores initial table height and object poses from recorded `state[0]` when available. |
-| `--save_failed`   | `False`           | Saves replay output even when the environment does not report success.                  |
-| `--save_depth`    | `False`           | Saves depth arrays and depth videos alongside RGB videos.                               |
-
-## Headless Mode
-
-Set EGL for offscreen rendering:
-
-```bash
-export MUJOCO_GL=egl
-```
-
-Use `policy_mode=True` and `render_mode="rgb_array"` to construct headless
-environments:
-
-```python
-TaskConfig.get_environment(policy_mode=True, render_mode="rgb_array", ...)
-```
-
-Common environment construction options:
-
-| Option                    | Description                                                              |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `policy_mode=True`        | Uses the policy action interface and disables interactive teleoperation. |
-| `render_mode="rgb_array"` | Enables offscreen image observations for automated evaluation.           |
-| `render_mode="human"`     | Opens the interactive MuJoCo viewer.                                     |
-| `randomize=True`          | Enables the visual randomization regime used by `rand_full` evaluation.  |
-| `randomize_dynamics=True` | Enables dynamics randomization when supported by the task.               |
-| `seed=<int>`              | Sets the task environment seed.                                          |
-
-## Policy Evaluation
-
-The `dexjoco_openpi_client` package provides the DexJoCo-side client for OpenPI
-policy evaluation. It adapts DexJoCo observations and actions to the OpenPI
-WebSocket policy interface, including camera mapping, image resizing, prompt
-injection, state slicing, and rotation-vector/quaternion action conversion.
-
-### Rand Obj
-
-This setting evaluates per-task policies with randomized object placement and
-table height.
-
-**serve policy**:
+Start an OpenPI policy server from the `openpi` environment:
 
 ```bash
 cd openpi
@@ -145,7 +123,7 @@ python scripts/serve_policy.py --port=8000 policy:checkpoint \
   --policy.dir ../checkpoints/pi05_ckpts/water_plant/<exp_name>/<step>
 ```
 
-**evaluate policy**:
+Run evaluation from the repository root in the `dexjoco` environment:
 
 ```bash
 conda activate dexjoco
@@ -155,164 +133,330 @@ dexjoco-openpi-eval \
   --port=8000
 ```
 
-**config file**:
-
-```yaml
-env_name: water_plant
-camera_mapping:
-  base: front
-  wrist: wrist
-prompt: "Grasp the watering can and apply water to the plant."
-robot_type: single_arm
-```
-
-### Rand Full
-
-This setting evaluates per-task policies with object placement, table height,
-camera pose, illumination, and tabletop texture randomization.
-
-**serve policy**:
-
-Use the same `serve_policy` command structure with the matching `rand_full`
-policy config and checkpoint, such as `water_plant_rand_full`.
-
-**evaluate policy**:
+For `rand_full` evaluation, use a config under `configs/rand_full/` and pass
+`--rand-full`:
 
 ```bash
 dexjoco-openpi-eval \
-  --config=./configs/rand_full/bimanual_microwave_cook.yaml \
+  --config=./configs/rand_full/water_plant.yaml \
   --seed=0 \
   --port=8000 \
   --rand-full
 ```
 
-**config file**:
+Convenience launch templates are available at
+[`scripts/serve_pi05.bash`](scripts/serve_pi05.bash) and
+[`scripts/evaluate_pi05.bash`](scripts/evaluate_pi05.bash).
 
-```yaml
-env_name: water_plant
-camera_mapping:
-  base: random_camera
-  wrist: wrist
-prompt: "Grasp the watering can and apply water to the plant."
-robot_type: single_arm
-```
+`dexjoco-openpi-eval` options:
 
-### Multi-Task
+| Option                            | Default        | Description                                                        |
+| --------------------------------- | -------------- | ------------------------------------------------------------------ |
+| `--config PATH`                   | Required       | Evaluation YAML under `configs/rand_obj/` or `configs/rand_full/`. |
+| `--seed INT`                      | `0`            | Random seed for NumPy and Python random state.                     |
+| `--rand-full`                     | `False`        | Enables the `rand_full` evaluation regime.                         |
+| `--randomize-dynamics`            | `False`        | Enables dynamics randomization.                                    |
+| `--port INT`                      | `8000`         | OpenPI websocket policy server port.                               |
+| `--output PATH`                   | Auto-generated | Output directory for videos and success-rate marker files.         |
+| `--render-mode {rgb_array,human}` | `rgb_array`    | DexJoCo rendering mode. `rgb_array` is headless.                   |
+| `--episodes INT`                  | `50`           | Number of evaluation episodes to run.                              |
 
-This setting evaluates policies trained jointly across the DexJoCo task suite
-with a unified observation and state representation.
+See
+[`dexjoco/dexjoco_openpi_client/eval_dexjoco_openpi.py`](dexjoco/dexjoco_openpi_client/eval_dexjoco_openpi.py)
+for the complete option set.
 
-**serve policy**:
+## 🔌 Custom Policy Integration
 
-Use the same `serve_policy` command structure with the multi-task policy config
-and checkpoint, such as `multi_task`.
+DexJoCo supports custom policy evaluation through the same environment contract
+used by the OpenPI client. Observations are collected from the simulator and
+passed to a policy for action inference. The resulting actions are executed in
+the environment.
 
-**evaluate policy**:
+Custom integrations should follow the protocol described in
+[`docs/custom_policy_integration.md`](docs/custom_policy_integration.md),
+including:
 
-Pass `--pad-state-dim46` to pad single-arm state vectors to the 46-dimensional
-dual-arm state layout used by the multi-task training data.
+- observation fields for camera images, proprioceptive state, and prompts
+- action layout conversion from rotation-vector policy actions to quaternion
+  environment actions
+- chunked action execution and replanning for latency-tolerant inference
+- optional multi-frame observation history
+- LeRobot-style `async_inference` integration patterns
+
+## 📦 Data Collection
+
+Please refer to the [`teleoperation/`](teleoperation/) directory for the
+hardware and software configuration required for teleoperation:
+
+| Component                   | Documentation                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| teleoperation overview      | [`teleoperation/README.md`](teleoperation/README.md)                                                 |
+| hardware setup              | [`teleoperation/Teleoperation_System_Tutorial.pdf`](teleoperation/Teleoperation_System_Tutorial.pdf) |
+| Vive tracker bridge         | [`teleoperation/vive_bridge`](teleoperation/vive_bridge)                                             |
+| Rokoko hand-keypoint bridge | [`teleoperation/rokoko`](teleoperation/rokoko)                                                       |
+| GeoRT hand retargeting      | [`teleoperation/GeoRT`](teleoperation/GeoRT)                                                         |
+
+Supported tasks:
+
+| Task           | Setup      | Task Name                 |
+| -------------- | ---------- | ------------------------- |
+| Unlock iPad    | Bimanual   | `bimanual_unlock_ipad`    |
+| Hanoi          | Bimanual   | `bimanual_hanoi`          |
+| Assembly       | Bimanual   | `bimanual_assembly`       |
+| Microwave cook | Bimanual   | `bimanual_microwave_cook` |
+| Photograph     | Bimanual   | `bimanual_photograph`     |
+| Hammer nail    | Single-arm | `hammer_nail`             |
+| Click mouse    | Single-arm | `click_mouse`             |
+| Pick bucket    | Single-arm | `pick_bucket`             |
+| Pinch tongs    | Single-arm | `pinch_tongs`             |
+| Fold glasses   | Single-arm | `fold_glasses`            |
+| Water plant    | Single-arm | `water_plant`             |
+
+TODO: how to add new tasks?
+
+Start demonstration recording from the repository root with
+[`scripts/record_demos_zarr.py`](scripts/record_demos_zarr.py):
 
 ```bash
-dexjoco-openpi-eval \
-  --config=./configs/multi_task/water_plant.yaml \
-  --seed=0 \
-  --port=8000 \
-  --pad-state-dim46
+conda activate dexjoco
+python scripts/record_demos_zarr.py \
+  --exp_name=water_plant \
+  --successes_needed=20 \
+  --randomize=True \
+  --out_dir=./demos
 ```
 
-**config file**:
+The script opens the selected DexJoCo task, records successful teleoperation
+episodes, and writes each success as a replayable Zarr episode with camera
+videos.
 
-Multi-task configs use a unified observation layout across DexJoCo tasks. For
-single-arm tasks, both `wrist_left` and `wrist_right` are mapped to the same
-environment `wrist` camera.
+Common `record_demos_zarr.py` options:
 
-```yaml
-env_name: water_plant
-camera_mapping:
-  base: front
-  wrist_left: wrist
-  wrist_right: wrist
-prompt: "Grasp the watering can and apply water to the plant."
-robot_type: single_arm
-```
+| Flag                 | Purpose                                                                       |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `--exp_name`         | Selects one of the task names.                                                |
+| `--successes_needed` | Stops collection after the requested number of successful demos.              |
+| `--randomize`        | Enables the `rand_full` visual randomization regime used for data collection. |
+| `--show_sim_cameras` | Displays camera streams during interactive collection.                        |
+| `--save_depth`       | Saves depth arrays and depth videos alongside RGB videos.                     |
+| `--out_dir`          | Selects the output directory for collected demos.                             |
 
-### iPad Reasoning
+[`scripts/record_demos_zarr.py`](scripts/record_demos_zarr.py) supports
+`--camera_screen_effect` to display a camera viewfinder overlay, defaults to
+`False`.
 
-This setting evaluates language-conditioned iPad unlock behavior with digit,
-word, and arithmetic password instructions.
+## 🎬 Demonstration Replay
 
-**serve policy**:
+Raw DexJoCo datasets for replay are available from
+[`DexJoCo/DexJoCo-Datasets-Raw`](https://huggingface.co/datasets/DexJoCo/DexJoCo-Datasets-Raw).
 
-Use the same `serve_policy` command structure with an iPad unlock policy
-checkpoint.
-
-**evaluate policy**:
-
-Use `--output` to keep results from different prompt and password configs in
-separate directories.
+Replay recorded demonstrations with
+[`scripts/replay_demos_zarr.py`](scripts/replay_demos_zarr.py):
 
 ```bash
-dexjoco-openpi-eval \
-  --config=./configs/ipad_reasoning/2+2.yaml \
-  --seed=0 \
-  --port=8000 \
-  --output=./outputs/ipad_reasoning_2_plus_2_seed0
+conda activate dexjoco
+python scripts/replay_demos_zarr.py \
+  --exp_name=water_plant \
+  --input_dir=./demos \
+  --out_dir=./replay_output \
+  --randomize=True \
+  --restore_state=True
 ```
 
-**config file**:
+Replay runs through the policy interface, can restore recorded initial object
+poses and table height, and can generate `rand_full` visual variants through
+camera, lighting, and table texture randomization.
 
-iPad reasoning configs target `bimanual_unlock_ipad` with prompt variants such
-as digits, words, and arithmetic expressions. The optional `password` list sets
-the target iPad password and is used only by the iPad unlock environment.
+Common `replay_demos_zarr.py` options:
 
-```yaml
-env_name: bimanual_unlock_ipad
-camera_mapping:
-  base: ego
-  wrist_left: wrist_left
-  wrist_right: wrist_right
-prompt:
-  "Grasp the iPad and enter the result of 2+2 as the password to unlock the
-  device."
-password: [4]
-robot_type: dual_arm
+| Flag           | Default           | Purpose                                                                                                 |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `--exp_name`   | `water_plant`     | Selects the task used to replay the demonstrations.                                                     |
+| `--input_dir`  | `./`              | Directory containing recorded demo folders with `replay.zarr`.                                          |
+| `--out_dir`    | `./replay_output` | Output directory for replayed Zarr episodes and videos.                                                 |
+| `--randomize`  | `True`            | Enables replay-time `rand_full` visual randomization with preset camera, lighting, and texture changes. |
+| `--seed`       | `0`               | Base replay seed; the demo index is added for each input demo.                                          |
+| `--save_depth` | `False`           | Saves depth arrays and depth videos alongside RGB replay videos.                                        |
+
+See [`scripts/replay_demos_zarr.py`](scripts/replay_demos_zarr.py) for the
+complete option set.
+
+[`scripts/replay_demos_zarr.py`](scripts/replay_demos_zarr.py) supports
+`--camera_screen_effect` to display a camera viewfinder overlay, defaults to
+`False`.
+
+<a id="data-format"></a>
+
+## 🗂️ Data Format
+
+Each successful demonstration is written as:
+
+```text
+<out_dir>/<exp_name>_demo_<index>_<timestamp>/
+  replay.zarr/
+  videos/<camera_key>.mp4
+  videos/<camera_key>_depth.npz
+  videos/<camera_key>_depth.mp4
 ```
 
-Evaluation videos and success-rate marker files are written under `outputs/` by
-default. Use `--output` to select a different output directory.
+Depth outputs are present when `--save_depth=True`.
 
-Evaluation configs live under `configs/rand_obj/`, `configs/rand_full/`,
-`configs/multi_task/`, and `configs/ipad_reasoning/`. Each config defines the
-DexJoCo task, camera mapping, language prompt, and robot layout. Single-arm
-configs set `robot_type` to `single_arm` and use a `base` camera with one wrist
-camera. Dual-arm configs set `robot_type` to `dual_arm` and use `base`,
-`wrist_left`, and `wrist_right` cameras.
+The Zarr replay buffer stores low-dimensional episode data:
 
-`dexjoco-openpi-eval` supports the following options:
+| Field           | Description                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `action`        | Recorded policy or teleoperation actions.                                                       |
+| `action_rotvec` | Action representation with orientation stored as rotation vectors when conversion is available. |
+| `timestamp`     | Per-step timestamps derived from `--data_fps`.                                                  |
+| `state`         | Proprioceptive and task state used by replay and state restoration when available.              |
 
-| Option                            | Default        | Description                                                                              |
-| --------------------------------- | -------------- | ---------------------------------------------------------------------------------------- |
-| `--config PATH`                   | Required       | Evaluation YAML under one of the supported `configs/` subdirectories.                    |
-| `--seed INT`                      | `0`            | Random seed for NumPy and Python random state.                                           |
-| `--rand-full`                     | `False`        | Enables the `rand_full` visual randomization regime.                                     |
-| `--randomize-dynamics`            | `False`        | Enables dynamics randomization.                                                          |
-| `--port INT`                      | `8000`         | OpenPI WebSocket policy server port.                                                     |
-| `--host HOST`                     | `0.0.0.0`      | Host address used by the OpenPI WebSocket client.                                        |
-| `--output PATH`                   | Auto-generated | Output directory for videos and success-rate marker files.                               |
-| `--render-mode {rgb_array,human}` | `rgb_array`    | DexJoCo rendering mode.                                                                  |
-| `--replan-ratio FLOAT`            | `0.8`          | Fraction of the OpenPI action horizon to execute before requesting a fresh action chunk. |
-| `--episodes INT`                  | `50`           | Number of evaluation episodes to run.                                                    |
-| `--pad-state-dim46`               | `False`        | Pads the policy state representation to 46 dimensions for compatibility.                 |
-| `--record-pressed-digits BOOL`    | Task-dependent | Controls whether iPad digit inputs are recorded in episode output names.                 |
+### Policy Training Action and State Layout
 
-## Credits
+For bimanual demonstrations, the recorded action layout is:
 
-- This simulation stack was originally built on top of work by
-  [Kevin Zakka](https://kzakka.com/).
-- DexJoCo environments adapt and extend that Gymnasium-based foundation.
+```text
+[r_pose7, r_hand16, l_pose7, l_hand16]
+```
 
-## License
+The policy-mode DexJoCo environment expects the flat action layout:
 
-DexJoCo-owned code in this package is released under the MIT License. Bundled
-third-party robot and hand assets under `dexjoco/sim/envs/xmls` retain their own
-license terms.
+```text
+[r_pose7, l_pose7, r_hand16, l_hand16]
+```
+
+During OpenPI evaluation,
+[`dexjoco/dexjoco_openpi_client/dexjoco_openpi_env.py`](dexjoco/dexjoco_openpi_client/dexjoco_openpi_env.py)
+handles the action order conversion automatically. It also converts
+rotation-vector actions into the quaternion pose representation used by the
+DexJoCo environment.
+
+OpenPI training uses `action_rotvec` as the action target. The raw `action`
+field stores quaternion poses with 23 dimensions for single-arm tasks and 46
+dimensions for bimanual tasks. `action_rotvec` stores the action layout with 22
+dimensions for single-arm tasks and 44 dimensions for bimanual tasks.
+
+The recorded `state` field includes privileged environment state for replay,
+such as object poses and table height. Policy training should use only robot
+proprioception:
+
+| Setup      | Policy State                                                              |
+| ---------- | ------------------------------------------------------------------------- |
+| Single-arm | First 23 dimensions: TCP pose and hand joints                             |
+| Bimanual   | First 46 dimensions: right TCP pose, left TCP pose, right hand, left hand |
+
+Privileged environment fields should be filtered out before training policy
+models.
+
+<a id="data-conversion"></a>
+
+## 🔄 Data Conversion
+
+Use [`dexjoco-data-converter/`](dexjoco-data-converter/) to convert raw DexJoCo
+datasets into LeRobot datasets or Zarr replay buffers.
+
+```bash
+bash dexjoco-data-converter/install.bash
+conda activate dexjoco-dc
+
+dexjoco-dc-single-lerobot \
+  --input ./datasets/raw/dexjoco_raw_datasets/water_plant \
+  --output ./converted_datasets/lerobot/single/water_plant \
+  --language-instruction "Grasp the watering can and apply water to the plant." \
+  --selected-data-yaml "{action: action_rotvec, state: state, cameras: {front: front, wrist: wrist}}" \
+  --slice-yaml "{state: [null, 23]}"
+```
+
+See [`dexjoco-data-converter/README.md`](dexjoco-data-converter/README.md) for
+batch conversion, multi-task merge and configuration files.
+
+<a id="policy-training"></a>
+
+## ⚙️ Policy Training
+
+DexJoCo LeRobot datasets are available from
+[`DexJoCo/DexJoCo-Datasets-LeRobot`](https://huggingface.co/datasets/DexJoCo/DexJoCo-Datasets-LeRobot).
+
+OpenPI π0.5 training support lives under [`openpi/`](openpi). The OpenPI setup
+covers two DexJoCo data regimes:
+
+| Regime      | Randomization                                                                  |
+| ----------- | ------------------------------------------------------------------------------ |
+| `rand_obj`  | Object placement and table height randomization                                |
+| `rand_full` | `rand_obj` plus third-person camera, lighting, and table texture randomization |
+
+Training workflow:
+
+1. Install the OpenPI environment with
+   [`openpi/install.bash`](openpi/install.bash).
+2. Place checkpoints and LeRobot datasets according to
+   [`openpi/config.yaml`](openpi/config.yaml).
+3. Convert the π0.5 base checkpoint for 44-dimensional bimanual actions with
+   [`openpi/scripts/convert_to_action_dim_44_model.py`](openpi/scripts/convert_to_action_dim_44_model.py)
+   when training bimanual tasks.
+4. Compute normalization statistics with
+   [`openpi/scripts/compute_norm_stats.py`](openpi/scripts/compute_norm_stats.py)
+   or
+   [`openpi/scripts/compute_norm_stats.bash`](openpi/scripts/compute_norm_stats.bash).
+5. Launch multiple tmux training jobs with
+   [`openpi/scripts/launch_tmux_train.py`](openpi/scripts/launch_tmux_train.py),
+   or train a single policy with
+   [`openpi/scripts/train.py`](openpi/scripts/train.py).
+
+See [`openpi/README.md`](openpi/README.md) for command examples and checkpoint
+layout details.
+
+<a id="headless-rendering"></a>
+
+## 🖥️ Headless Rendering
+
+Headless environments use `policy_mode=True` and `render_mode="rgb_array"`:
+
+```python
+TaskConfig.get_environment(
+    policy_mode=True,
+    render_mode="rgb_array",
+    ...
+)
+```
+
+`policy_mode=True` exposes the policy action interface and disables the
+teleoperation wrapper. `render_mode="rgb_array"` selects offscreen rendering for
+policy evaluation and automated environment usage.
+
+Interactive teleoperation collection uses `policy_mode=False` and the MuJoCo
+viewer, so it does not require the headless configuration.
+
+## 📄 License
+
+DexJoCo-owned code in this repository is released under the
+[`MIT License`](LICENSE).
+
+Bundled third-party components and assets retain their separate license terms:
+
+| Component                                                                | License Scope                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| [`teleoperation/GeoRT`](teleoperation/GeoRT)                             | Upstream non-commercial GeoRT license                                |
+| [`franka_emika_panda`](dexjoco/dexjoco/sim/envs/xmls/franka_emika_panda) | Apache-2.0                                                           |
+| [`wonik_allegro`](dexjoco/dexjoco/sim/envs/xmls/wonik_allegro)           | BSD-2-Clause                                                         |
+| [`openpi/`](openpi)                                                      | Apache License, Version 2.0, plus Gemma model terms where applicable |
+
+## 📚 Citation
+
+```bibtex
+@misc{wang2026dexjocobenchmarktoolkittaskoriented,
+      title={DexJoCo: A Benchmark and Toolkit for Task-Oriented Dexterous Manipulation on MuJoCo},
+      author={Hanwen Wang and Weizhi Zhao and Xiangyu Wang and Siyuan Huang and He Lin and Boyuan Zheng and Rongtao Xu and Gang Wang and Yao Mu and He Wang and Lue Fan and Hongsheng Li and Zhaoxiang Zhang and Tieniu Tan},
+      year={2026},
+      eprint={2605.16257},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2605.16257},
+}
+```
+
+
+## 单臂／双臂多任务训练与部署
+
+[单臂／双臂多任务训练与部署](docs/group_training.md)：任务均衡采样、本地合成数据 smoke test、H100 LoRA 训练、共享策略服务、批量评测与结果汇总。
+
+[中文参数配置索引](docs/configuration_guide.md)：模型、数据、训练、GPU、部署、推理与闭环评测参数的类别和来源。

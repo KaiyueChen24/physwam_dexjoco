@@ -1,0 +1,32 @@
+# [GPU/启动] LOCAL_MACHINE 表示从当前机器启动。
+compute_environment: LOCAL_MACHINE
+# [GPU/调试] 是否启用 Accelerate 调试输出。
+debug: false
+# [GPU/分布式] 使用 DeepSpeed；不是 π0.5 的 JAX FSDP。
+distributed_type: DEEPSPEED
+# [GPU/DeepSpeed] DeepSpeed 启动配置。
+deepspeed_config:
+  # [GPU/DeepSpeed] 具体 ZeRO、通信与卸载设置的 JSON 路径，见参数索引。
+  deepspeed_config_file: scripts/ds_configs/ds_zero1_config.json
+  # [GPU/初始化] 是否使用 ZeRO-3 初始化路径；此处关闭。
+  zero3_init_flag: false
+
+# Keep this null when using deepspeed_config_file; precision is controlled by
+# training config (Trainer -> Accelerator(mixed_precision=...)) and DS JSON.
+# [GPU/精度] 配合外部 DeepSpeed JSON 时保持 null；精度来自训练配置及 DeepSpeed。
+mixed_precision: null
+
+# [GPU/多机] 当前机器编号，从 0 开始。
+machine_rank: 0
+# [GPU/启动] 训练主函数名称。
+main_training_function: main
+# [GPU/多机] 参与训练的机器数；当前分组入口按单机使用。
+num_machines: 1
+# [GPU/进程] 模板默认进程数；启动器按 --gpus 中的卡数覆盖。
+num_processes: 1
+# [GPU/通信] 分布式 rendezvous 后端。
+rdzv_backend: static
+# [GPU/通信] 是否处于同一网络。
+same_network: true
+# [GPU/设备] false 使用加速设备，true 强制 CPU。
+use_cpu: false

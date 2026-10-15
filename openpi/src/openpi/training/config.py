@@ -72,6 +72,8 @@ class DataConfig:
     asset_id: str | None = None
     # * Root directory for the LeRobot dataset. Added by Weizhi
     root: pathlib.Path | None = None
+    # Optional DexJoCo task-group dataset description.
+    multitask: dict | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
     norm_stats: dict[str, _transforms.NormStats] | None = None
 

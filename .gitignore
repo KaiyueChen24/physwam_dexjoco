@@ -31,3 +31,9 @@ AGENTS.md
 repomix-output.xml
 repomix.config.json
 converted_datasets/
+
+# Training and evaluation artifacts
+/runs
+/logs/
+*.bak
+*.log

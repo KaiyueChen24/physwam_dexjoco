@@ -1,0 +1,161 @@
+"""Evaluate every task with one shared policy and persist resumable per-job results."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import uuid
+
+import numpy as np
+import yaml
+
+from group_common import ROOT, read_run, repo_path
+
+
+def parse_success(directory, expected_episodes):
+    markers = list(Path(directory).glob("success_rate_*.txt"))
+    if len(markers) != 1:
+        raise ValueError("Expected exactly one completed success-rate marker")
+    match = re.fullmatch(r"success_rate_(\d+)_(\d+)\.txt", markers[0].name)
+    if not match:
+        raise ValueError("Malformed success-rate marker")
+    successes, episodes = map(int, match.groups())
+    if episodes != expected_episodes or not 0 <= successes <= episodes:
+        raise ValueError("Incomplete evaluation or invalid success count")
+    return successes, episodes
+
+
+def latency_summary(path):
+    if not path.is_file():
+        return None
+    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    # One initial chunk is excluded from steady-state latency; its timing remains in JSONL.
+    steady = records[1:]
+    result = {"chunks_total": len(records), "warmup_chunks_excluded": 1 if records else 0}
+    for key in ("roundtrip_ms", "server_infer_ms"):
+        values = [r[key] for r in steady if r.get(key) is not None]
+        if values:
+            result[key] = {"mean": float(np.mean(values)), "p50": float(np.percentile(values, 50)),
+                           "p95": float(np.percentile(values, 95))}
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", required=True)
+    parser.add_argument("--group", choices=("single_arm", "dual_arm"))
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--tasks", nargs="+", help="Subset for smoke evaluation")
+    parser.add_argument("--evaluation-name", default="rand_obj")
+    parser.add_argument("--timeout", type=float, default=7200)
+    parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--allow-smoke-checkpoint", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    if args.episodes <= 0 or args.timeout <= 0 or len(args.seeds) != len(set(args.seeds)):
+        parser.error("Episodes/timeout must be positive and seeds must be unique")
+    if Path(args.evaluation_name).name != args.evaluation_name or args.evaluation_name in (".", ".."):
+        parser.error("evaluation-name must be a simple directory name")
+    resolved = read_run(args.run_dir)
+    group = resolved["group"]
+    if args.group and args.group != group["name"]:
+        parser.error("Requested group does not match training run")
+    available = {t["name"] for t in group["tasks"]}
+    if args.tasks and not set(args.tasks) <= available:
+        parser.error("Requested task is outside this group")
+    tasks = [t for t in group["tasks"] if not args.tasks or t["name"] in args.tasks]
+    jobs = [{"task": t["name"], "seed": s, "episodes": args.episodes} for t in tasks for s in args.seeds]
+    if args.dry_run:
+        print(json.dumps({"group": group["name"], "jobs": jobs}, indent=2))
+        return
+    executable = shutil.which("dexjoco-openpi-eval")
+    if not executable:
+        parser.error("Activate dexjoco environment; dexjoco-openpi-eval is missing")
+    from openpi_client import msgpack_numpy
+    from websockets.sync.client import connect
+
+    with connect(f"ws://{args.host}:{args.port}", open_timeout=15, max_size=None) as socket:
+        metadata = msgpack_numpy.unpackb(socket.recv(timeout=15))
+    if metadata.get("group") != group["name"] or metadata.get("run_name") != resolved["run_name"]:
+        raise ValueError("Server is serving a different group/run; start serve_group.py for this run")
+    if metadata.get("action_horizon") != 30:
+        raise ValueError("The current DexJoCo evaluator requires action_horizon=30")
+    if (metadata.get("synthetic") or metadata.get("tiny")) and not args.allow_smoke_checkpoint:
+        raise ValueError("Synthetic/tiny checkpoints cannot be used for benchmark reporting")
+    evaluation_dir = Path(resolved["run_dir"]) / "evaluation" / args.evaluation_name
+    evaluation_dir.mkdir(parents=True, exist_ok=True)
+    plan = {"group": group["name"], "run_name": resolved["run_name"], "server": metadata, "jobs": jobs}
+    plan_path = evaluation_dir / "plan.json"
+    if plan_path.exists() and json.loads(plan_path.read_text()) != plan:
+        raise ValueError("Evaluation plan/checkpoint changed; use a new evaluation-name")
+    plan_path.write_text(json.dumps(plan, indent=2))
+    failures = []
+    for job in jobs:
+        task = next(t for t in tasks if t["name"] == job["task"])
+        job_dir = evaluation_dir / f"{job['task']}_seed{job['seed']}"
+        job_dir.mkdir(exist_ok=True)
+        result_path = job_dir / "result.json"
+        if result_path.exists():
+            old = json.loads(result_path.read_text())
+            if old.get("status") == "complete":
+                print("Skip completed:", job, flush=True)
+                continue
+            if not args.retry_failed:
+                failures.append(job)
+                print("Skip failed job (use --retry-failed):", job, flush=True)
+                continue
+        attempt = job_dir / f"attempt_{uuid.uuid4().hex[:8]}"
+        attempt.mkdir()
+        evaluation_config = yaml.safe_load(repo_path(task["eval_config"]).read_text())
+        if evaluation_config["env_name"] != task["name"] or evaluation_config["robot_type"] != group["robot_type"]:
+            raise ValueError("Evaluation task/robot type does not match group")
+        evaluation_config["camera_mapping"] = task["cameras"]
+        evaluation_config["prompt"] = task["prompt"]
+        config_path = attempt / "environment.yaml"
+        config_path.write_text(yaml.safe_dump(evaluation_config, sort_keys=False))
+        output = attempt / "videos"
+        latency_path = attempt / "latency.jsonl"
+        command = [executable, "--config", str(config_path), "--host", args.host, "--port", str(args.port),
+                   "--seed", str(job["seed"]), "--episodes", str(args.episodes),
+                   "--output", str(output), "--metrics-output", str(latency_path),
+                   "--render-mode", "rgb_array"]
+        result = {**job, "group": group["name"], "checkpoint": metadata["checkpoint"],
+                  "synthetic": metadata.get("synthetic", False), "tiny": metadata.get("tiny", False),
+                  "command": command, "output": str(output), "status": "failed"}
+        print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)
+        try:
+            with (attempt / "eval.log").open("w") as log:
+                process = subprocess.Popen(command, cwd=ROOT, env={**os.environ, "MUJOCO_GL": "egl"},
+                                           stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                try:
+                    returncode = process.wait(timeout=args.timeout)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                    raise
+                if returncode:
+                    raise subprocess.CalledProcessError(returncode, command)
+            successes, episodes = parse_success(output, args.episodes)
+            result.update(status="complete", successes=successes, episodes=episodes,
+                          success_rate=successes / episodes, latency=latency_summary(latency_path))
+        except (subprocess.SubprocessError, OSError, ValueError) as exc:
+            result["error"] = str(exc)
+            failures.append(job)
+        result_path.write_text(json.dumps(result, indent=2))
+        print(result["status"], job, flush=True)
+    if failures:
+        raise SystemExit(f"{len(failures)} jobs failed or remain failed; inspect per-job logs")
+
+
+if __name__ == "__main__":
+    main()

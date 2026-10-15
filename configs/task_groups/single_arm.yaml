@@ -1,0 +1,57 @@
+schema_version: 1
+name: single_arm
+robot_type: single_arm
+state_dim: 23
+action_dim: 22
+model_action_dim: 32
+dataset_root: datasets/dexjoco_lerobot_datasets
+sampling: task_balanced
+tasks:
+- name: water_plant
+  dataset: water_plant
+  prompt: Grasp the watering can and apply water to the plant.
+  cameras:
+    base: front
+    wrist: wrist
+  eval_config: configs/rand_obj/water_plant.yaml
+  episodes: null
+- name: hammer_nail
+  dataset: hammer_nail
+  prompt: Use the hammer to drive the nail into the wooden board.
+  cameras:
+    base: front
+    wrist: wrist
+  eval_config: configs/rand_obj/hammer_nail.yaml
+  episodes: null
+- name: click_mouse
+  dataset: click_mouse
+  prompt: Move the mouse to the purple mouse pad and click the left mouse button.
+  cameras:
+    base: ego_right
+    wrist: wrist
+  eval_config: configs/rand_obj/click_mouse.yaml
+  episodes: null
+- name: pick_bucket
+  dataset: pick_bucket
+  prompt: Place the boxed food into the bucket and then lift the bucket.
+  cameras:
+    base: front
+    wrist: wrist
+  eval_config: configs/rand_obj/pick_bucket.yaml
+  episodes: null
+- name: pinch_tongs
+  dataset: pinch_tongs
+  prompt: Grasp the tongs and perform three consecutive open-close motions.
+  cameras:
+    base: front
+    wrist: wrist
+  eval_config: configs/rand_obj/pinch_tongs.yaml
+  episodes: null
+- name: fold_glasses
+  dataset: fold_glasses
+  prompt: Fold the glasses and place them into the case.
+  cameras:
+    base: front
+    wrist: wrist
+  eval_config: configs/rand_obj/fold_glasses.yaml
+  episodes: null

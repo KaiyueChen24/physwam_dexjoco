@@ -1,0 +1,59 @@
+schema_version: 1
+name: dual_arm
+robot_type: dual_arm
+state_dim: 46
+action_dim: 44
+model_action_dim: 44
+dataset_root: datasets/dexjoco_lerobot_datasets
+sampling: task_balanced
+tasks:
+- name: bimanual_microwave_cook
+  dataset: bimanual_microwave_cook
+  prompt: Open the microwave door, place the food inside the microwave, close the
+    door, and press the start button.
+  cameras:
+    base: ego
+    wrist_left: wrist_left
+    wrist_right: wrist_right
+  eval_config: configs/rand_obj/bimanual_microwave_cook.yaml
+  episodes: null
+- name: bimanual_unlock_ipad
+  dataset: bimanual_unlock_ipad
+  prompt: Grasp the iPad and enter the password 123 to unlock the device.
+  cameras:
+    base: ego
+    wrist_left: wrist_left
+    wrist_right: wrist_right
+  eval_config: configs/rand_obj/bimanual_unlock_ipad.yaml
+  episodes: null
+- name: bimanual_hanoi
+  dataset: bimanual_hanoi
+  prompt: 'Execute the final two moves of the three-level Tower of Hanoi: move the
+    medium disk from the middle peg to the right peg with the right hand, then move
+    the small disk from the left peg to the right peg with the left hand.'
+  cameras:
+    base: ego
+    wrist_left: wrist_left
+    wrist_right: wrist_right
+  eval_config: configs/rand_obj/bimanual_hanoi.yaml
+  episodes: null
+- name: bimanual_assembly
+  dataset: bimanual_assembly
+  prompt: Grasp the tray with the left hand and the peg with the right hand, then
+    insert the peg into the hole.
+  cameras:
+    base: ego
+    wrist_left: wrist_left
+    wrist_right: wrist_right
+  eval_config: configs/rand_obj/bimanual_assembly.yaml
+  episodes: null
+- name: bimanual_photograph
+  dataset: bimanual_photograph
+  prompt: Grasp the camera with the left hand, align it with the logo, and press the
+    shutter button with the right hand.
+  cameras:
+    base: ego
+    wrist_left: wrist_left
+    wrist_right: wrist_right
+  eval_config: configs/rand_obj/bimanual_photograph.yaml
+  episodes: null

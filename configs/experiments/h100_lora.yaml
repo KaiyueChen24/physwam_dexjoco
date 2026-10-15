@@ -1,0 +1,24 @@
+schema_version: 1
+model: pi05
+action_horizon: 30
+max_token_len: 250
+seed: 42
+fsdp_devices: 1
+wandb_enabled: false
+learning_rate: 5.0e-05
+sampling: task_balanced
+dataset_root: null
+video_backend: pyav
+stats_samples: 50000
+stats_batch_size: 256
+checkpoint_paths:
+  single_arm: checkpoints/pi05_base/params
+  dual_arm: checkpoints/pi05_base_action_dim_44/params
+synthetic: false
+batch_size: 32
+num_workers: 4
+num_train_steps: 60000
+warmup_steps: 10000
+log_interval: 100
+save_interval: 5000
+keep_period: 10000

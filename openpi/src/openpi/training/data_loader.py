@@ -132,6 +132,9 @@ def create_torch_dataset(
     data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
 ) -> Dataset:
     """Create a dataset for training."""
+    if data_config.multitask is not None:
+        from openpi.training.dexjoco_multitask import MultiTaskDataset
+        return MultiTaskDataset(data_config.multitask, action_horizon)
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
@@ -304,6 +307,7 @@ def create_torch_data_loader(
         seed: The seed to use for shuffling the data.
     """
     dataset = create_torch_dataset(data_config, action_horizon, model_config)
+    sampling_weights = getattr(dataset, "sampling_weights", None)
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     # Use TorchDataLoader for both frameworks
@@ -325,6 +329,13 @@ def create_torch_data_loader(
     else:
         local_batch_size = batch_size // jax.process_count()
 
+    if sampling_weights is not None and shuffle:
+        if framework == "pytorch" and torch.distributed.is_initialized():
+            raise NotImplementedError("Balanced task groups currently support single-process JAX multi-GPU training")
+        generator = torch.Generator().manual_seed(seed)
+        sampler = torch.utils.data.WeightedRandomSampler(
+            sampling_weights, num_samples=len(sampling_weights), replacement=True, generator=generator
+        )
     logging.info(f"local_batch_size: {local_batch_size}")
     data_loader = TorchDataLoader(
         dataset,

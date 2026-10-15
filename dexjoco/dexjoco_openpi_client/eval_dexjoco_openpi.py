@@ -1,6 +1,7 @@
 """Evaluate PI 0.5 policies on DexJoCo simulation environments."""
 
 import multiprocessing as mp
+import json
 import os
 import random
 import signal
@@ -108,6 +109,7 @@ def inference_process(
     inferencing_event: MpEvent,
     seed: int,
     host: str,
+    metrics_output: Path | None = None,
 ):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     _set_seed(seed)
@@ -121,7 +123,14 @@ def inference_process(
             stop_event.wait(0.01)
             continue
 
+        inference_start = time.perf_counter()
         result = client.infer(obs.obs)
+        if metrics_output is not None:
+            timing = {"timestamp": obs.timestamp,
+                      "roundtrip_ms": (time.perf_counter() - inference_start) * 1000,
+                      "server_infer_ms": result.get("server_timing", {}).get("infer_ms")}
+            with metrics_output.open("a") as metrics_file:
+                metrics_file.write(json.dumps(timing) + "\n")
         action_chunk = result["actions"]
 
         action_queue.put(ActionChunk(action=action_chunk, timestamp=obs.timestamp))
@@ -230,12 +239,15 @@ def main(
     episodes: int = 50,
     pad_state_dim46: bool = False,
     record_pressed_digits: bool | None = None,
+    metrics_output: Path | None = None,
 ):
     if render_mode == "rgb_array":
         os.environ.setdefault("MUJOCO_GL", "egl")
     else:
         os.environ.setdefault("MUJOCO_GL", "glfw")
     _set_seed(seed)
+    if metrics_output is not None:
+        metrics_output.parent.mkdir(parents=True, exist_ok=True)
 
     # Load evaluation configuration.
     with open(config, "r") as f:
@@ -285,7 +297,7 @@ def main(
 
     inference_proc = mp.Process(
         target=inference_process,
-        args=(obs_queue, action_queue, stop_event, port, inferencing_event, seed, host),
+        args=(obs_queue, action_queue, stop_event, port, inferencing_event, seed, host, metrics_output),
     )
     video_writers = None
 

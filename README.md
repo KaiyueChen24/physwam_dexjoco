@@ -451,3 +451,8 @@ Bundled third-party components and assets retain their separate license terms:
       url={https://arxiv.org/abs/2605.16257},
 }
 ```
+
+
+## 单臂／双臂多任务训练与部署
+
+[单臂／双臂多任务训练与部署](docs/group_training.md)：任务均衡采样、本地合成数据 smoke test、H100 LoRA 训练、共享策略服务、批量评测与结果汇总。

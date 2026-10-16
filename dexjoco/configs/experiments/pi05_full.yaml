@@ -33,7 +33,7 @@ checkpoint_paths:                       # [初始化/路径] 按 --group 选择�
 # 【训练与优化 / train】
 seed: 42                                # [训练/随机性] 模型、数据采样与统计使用的随机种子。
 batch_size: 128                          # [训练/批次] 所有 GPU 合计的全局 batch；必须能被可见 GPU 数整除。
-num_workers: 4                          # [数据/CPU] 数据加载工作进程数，不是 GPU 数；0 表示主进程加载。
+num_workers: 8                          # [数据/CPU] 视频解码与预处理进程数；先测 4/8/16 的吞吐，0 为主进程加载。
 num_train_steps: 100000                 # [训练/预算] 参数更新总步数，不是 epoch；本配方单、双臂均用此值。
 learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前 Python 将衰减终点设为相同值。
 warmup_steps: 10000                     # [训练/预热] 前多少次更新逐渐提高学习率，之后维持 learning_rate。

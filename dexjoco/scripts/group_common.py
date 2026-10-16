@@ -228,20 +228,31 @@ def validate_gpu(config):
         raise FileNotFoundError(f"Initialization checkpoint missing: {config.weight_loader.params_path}")
 
 
-def write_run(resolved):
+def write_run(resolved, *, resume=False):
     run_dir = Path(resolved["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
     snapshot = run_dir / "resolved_config.yaml"
     if snapshot.exists():
         old = read_run(run_dir)
         # A run's data, architecture, statistics and optimizer cannot silently change.
+        # 仅显式恢复时允许调整 CPU 加载进程数，并留下变更记录。
         old_exp, new_exp = dict(old["experiment"]), dict(resolved["experiment"])
         old_exp.pop("num_train_steps", None)
         new_exp.pop("num_train_steps", None)
+        runtime_change = None
+        if resume:
+            old_workers = old_exp.pop("num_workers", None)
+            new_workers = new_exp.pop("num_workers", None)
+            if old_workers != new_workers:
+                runtime_change = {"time": datetime.now().isoformat(),
+                                  "num_workers": {"old": old_workers, "new": new_workers}}
         if (old["group"] != resolved["group"] or old_exp != new_exp
                 or old.get("validation_group") != resolved.get("validation_group")
                 or old.get("data_split") != resolved.get("data_split")):
             raise ValueError("Existing run has different data/model settings; use another run-name")
+        if runtime_change:
+            with (run_dir / "runtime_changes.jsonl").open("a") as history:
+                history.write(json.dumps(runtime_change) + "\n")
     save_split(run_dir, resolved.get("data_split"))
     snapshot.write_text(yaml.safe_dump(resolved, sort_keys=False))
     if not (run_dir / "environment.txt").exists():

@@ -69,7 +69,7 @@ def main():
         validate_gpu(config)
         if config.checkpoint_dir.exists() and not args.resume:
             raise FileExistsError("Training run already has checkpoints; use --resume or another run-name")
-    run_dir = write_run(resolved)
+    run_dir = write_run(resolved, resume=args.resume)
     with (run_dir / "train.log").open("a", buffering=1) as log:
         with contextlib.redirect_stdout(Tee(sys.stdout, log)), contextlib.redirect_stderr(Tee(sys.stderr, log)):
             print(f"Stage: {args.stage}, group: {resolved['group']['name']}", flush=True)

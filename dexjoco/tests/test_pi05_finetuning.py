@@ -1,5 +1,6 @@
 """Verify actual model variants, trainable modules and saved-run compatibility."""
 import copy
+import json
 from pathlib import Path
 import sys
 
@@ -123,3 +124,42 @@ def test_full_mode_round_trips_through_saved_run(tmp_path):
     restored = read_run(tmp_path)
     assert restored["experiment"]["finetune_mode"] == "full"
     assert len(restored["group"]["tasks"]) == 6
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_worker_count_change_requires_explicit_resume_and_is_recorded(tmp_path, resume):
+    resolved = resolve(training_parser("test").parse_args(["--run-name", "workers"]))
+    resolved["run_dir"] = str(tmp_path)
+    resolved["experiment"]["num_workers"] = 4
+    (tmp_path / "environment.txt").write_text("fixture")
+    write_run(resolved)
+    changed = copy.deepcopy(resolved)
+    changed["experiment"]["num_workers"] = 8
+    if not resume:
+        with pytest.raises(ValueError, match="different data/model settings"):
+            write_run(changed)
+        assert not (tmp_path / "runtime_changes.jsonl").exists()
+        assert read_run(tmp_path)["experiment"]["num_workers"] == 4
+        return
+    write_run(changed, resume=True)
+    assert read_run(tmp_path)["experiment"]["num_workers"] == 8
+    records = [json.loads(line) for line in (tmp_path / "runtime_changes.jsonl").read_text().splitlines()]
+    assert records[0]["num_workers"] == {"old": 4, "new": 8}
+    write_run(changed, resume=True)
+    assert len((tmp_path / "runtime_changes.jsonl").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("field,value", [("batch_size", 256), ("learning_rate", 1e-4),
+                                       ("sampling", "frame_uniform"), ("finetune_mode", "lora")])
+def test_worker_tuning_does_not_allow_other_resume_changes(tmp_path, field, value):
+    resolved = resolve(training_parser("test").parse_args(["--run-name", "workers"]))
+    resolved["run_dir"] = str(tmp_path)
+    (tmp_path / "environment.txt").write_text("fixture")
+    write_run(resolved)
+    changed = copy.deepcopy(resolved)
+    changed["experiment"]["num_workers"] = 16
+    changed["experiment"][field] = value
+    with pytest.raises(ValueError, match="different data/model settings"):
+        write_run(changed, resume=True)
+    assert not (tmp_path / "runtime_changes.jsonl").exists()
+    assert read_run(tmp_path)["experiment"][field] == resolved["experiment"][field]

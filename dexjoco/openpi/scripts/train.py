@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import platform
+import time
 from typing import Any
 
 import etils.epath as epath
@@ -280,12 +281,17 @@ def main(config: _config.TrainConfig):
     )
 
     infos = []
+    interval_started = time.perf_counter()
+    data_wait_seconds = 0.0
+    interval_steps = 0
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
         infos.append(info)
         # [日志/步数] 训练、验证、checkpoint 统一使用已经完成的优化器更新次数。
-        completed_step = int(train_state.step)
+        # 每次 update 固定增加一步；使用 CPU 循环计数，避免逐步读回 GPU 标量而强制同步。
+        completed_step = step + 1
+        interval_steps += 1
         logged_metrics = {}
         if completed_step % config.log_interval == 0 or completed_step == config.num_train_steps:
             stacked_infos = common_utils.stack_forest(infos)
@@ -295,8 +301,20 @@ def main(config: _config.TrainConfig):
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {completed_step}: {info_str}")
             logged_metrics.update(reduced_info)
+            # reduced_info 已读回 CPU，当前窗口的更新已完成；不额外同步每一步。
+            elapsed = time.perf_counter() - interval_started
+            logged_metrics.update({
+                "perf/samples_per_second": config.batch_size * interval_steps / max(elapsed, 1e-9),
+                "perf/data_wait_seconds_per_step": data_wait_seconds / interval_steps,
+            })
+            logging.info("[performance] step=%d samples/s=%.2f data_wait_s/step=%.4f",
+                         completed_step, logged_metrics["perf/samples_per_second"],
+                         logged_metrics["perf/data_wait_seconds_per_step"])
             infos = []
+        wait_started = time.perf_counter()
         batch = next(data_iter)
+        next_batch_wait = time.perf_counter() - wait_started
+        auxiliary_started = time.perf_counter()
 
         if validation and (completed_step % config.validation["interval"] == 0 or completed_step == config.num_train_steps):
             result = validation.evaluate(train_state.params, completed_step)
@@ -309,6 +327,15 @@ def main(config: _config.TrainConfig):
 
         if completed_step % config.save_interval == 0 or completed_step == config.num_train_steps:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, completed_step)
+
+        if "perf/samples_per_second" in logged_metrics:
+            # 验证与保存调用不计入下一训练窗口；已取出的下一批等待时间归入下一窗口。
+            interval_started = time.perf_counter() - next_batch_wait
+            data_wait_seconds = next_batch_wait
+            interval_steps = 0
+        else:
+            interval_started += time.perf_counter() - auxiliary_started
+            data_wait_seconds += next_batch_wait
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()

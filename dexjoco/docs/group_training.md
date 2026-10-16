@@ -71,7 +71,7 @@ validation_batch_size: 8       # [验证/GPU] π0.5 所有 GPU 合计的 batch�
 validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；整数限制每任务的验证批次数
 ```
 
-全量短跑使用验证间隔 10、全局验证 batch 4，每任务最多 2 批；正式 pi05_full 配方遍历完整验证集。
+全量短跑使用验证间隔 10、全局验证 batch 4，每任务最多 2 批；正式配方按 validation_max_batches 控制每任务预算。
 真实数据按每任务的 episode 数向上取整，至少留一条验证和一条训练示范；不足两条时报错。
 例如每任务 100 条 episode，默认 90 条训练、10 条验证；episode 长短不一时帧数比例不保证恰为 9:1。
 同一任务在两个模型中采用相同的候选 episode、比例和种子时，得到相同划分。
@@ -152,7 +152,7 @@ python scripts/train_group.py --stage prepare --run-name single_full
 # 分组计算统计（train 阶段在统计不存在时也会自动计算）
 python scripts/train_group.py --stage stats --run-name single_full
 
-# 正式全量微调：默认四卡 FSDP、全局 batch 32（每卡 8 条样本）
+# 正式全量微调：默认四卡 FSDP、全局 batch 128（每卡 32 条样本）
 python scripts/train_group.py --run-name single_full
 ```
 
@@ -176,6 +176,55 @@ python scripts/train_group.py --run-name single_full --resume
 旧 LoRA run 的快照没有 `finetune_mode` 时仍按 LoRA 构建，服务与恢复保持原结构；全量训练必须使用新的 run-name。
 支持恢复模型、优化器、随机步计数；上游 reader/sampler 迭代游标未持久化，因此不保证数据顺序逐帧复现。
 checkpoint 位于 `runs/<run-name>/checkpoints/pi05_<group>_multitask/<run-name>/<step>/`。
+
+## 数据加载与 GPU 空闲排查
+
+`pi05_full.yaml` 的 `num_workers` 从 4 调整为 8，控制 CPU 视频解码、图像变换和组批的进程数。
+这只是起点，不保证 8 或 16 一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
+保持 batch=128、模型和数据不变，先对 4/8/16 做对照。检查当前作业的 CPU 亲和性与线程配额：
+
+```bash
+nproc
+```
+
+在暂停训练后测试，避免争用 CPU/I/O 污染对比。以下命令只读取已有 run 的训练划分、batch 和归一化资产，
+不加载 base 权重或模型，不启动 W&B，不占用 GPU，也不覆盖原 run；需先有 `norm_stats.json`。
+单次脚本结束会退出加载进程。示例中的 run-name 替换为实际 batch 128 实验：
+
+```bash
+RUN=pi05_single_full_b128_实际时间戳
+for workers in 4 8 16; do
+  python scripts/benchmark_pi05_data.py --run-dir "runs/$RUN" \
+    --num-workers "$workers" --warmup-batches 8 --batches 64
+done
+```
+
+比较 `samples_per_second`（越高越好）、`seconds_per_batch_mean` 和 `seconds_per_batch_p95`（越低越好）。
+测试包括视频解码、训练数据变换、组批和 CPU Tensor 转换，不包括 GPU 搬运、模型计算和四卡通信。
+第一次运行可能遇到冷文件缓存；对最好的候选重复一次确认，不能把 CPU 测试吞吐当成 GPU 训练吞吐。
+
+同步本次代码后，可以在已有 checkpoint 的原 run 恢复时只调整 workers，无需从 base 重训：
+
+```bash
+python scripts/train_group.py --experiment configs/experiments/pi05_full.yaml \
+  --run-name "$RUN" --gpus 0,1,2,3 --fsdp-devices 4 \
+  --batch-size 128 --num-workers 8 --resume
+```
+
+先确认上一进程已停止且 checkpoint 完整写入；恢复会从最近保存点开始，未保存的更新不能恢复。
+加载进程数变更写入 `runtime_changes.jsonl`，当前配置更新到 `resolved_config.yaml`。
+batch、学习率、模型、数据划分等设置仍不允许在原 run 内更改；reader/sampler 游标仍不保证逐帧复现。
+
+训练循环用 CPU 循环步数编号，初始化/恢复时才读取 GPU 步数，不再每步读回标量。
+W&B 与控制台的性能指标随 `log_interval` 输出：
+
+- `perf/samples_per_second`：当前训练窗口的全局样本吞吐；窗口末等待训练指标完成。
+- `perf/data_wait_seconds_per_step`：主进程取下一批的平均耗时，包括数据等待与数组分片提交；
+  部分耗时可能与 GPU 计算重叠，不能直接当作 GPU 空闲时间。
+
+第一个窗口包含首次训练 JIT 编译；性能窗口不计入显式验证和 checkpoint 保存调用，后台保存 I/O 的影响仍可能出现。
+若增加 workers 后吞吐没有改善，下一步应采集 CPU/I/O 和 JAX profiler，定位解码、存储或通信瓶颈，
+不要仅凭功耗波形改视频编码、训练样本或切换解码后端。
 
 ## W&B 登录、GPU 与 loss 监控
 
@@ -212,7 +261,7 @@ wandb login
 GPU 系统指标通常以时间为横轴，loss 以已完成的优化器更新次数为横轴。
 这不是逐任务训练 loss；当前需求采用逐任务验证 loss 衡量每个任务的留出集表现。
 
-正式配置 `validation_ratio: 0.1` 按完整 episode 留出，`validation_max_batches: null` 遍历全部留出帧；
+正式配置 `validation_ratio: 0.1` 按完整 episode 留出，`validation_max_batches: 50` 限制每任务最多 50 批；设为 null 才遍历全部留出帧。
 同一模型依次计算六任务的验证 loss，不更新模型，最终 `val/loss` 为六个任务平均 loss 的等权平均。
 训练预算由 num_train_steps 指定；例如 100000 步、验证间隔 1000 时，验证发生在 1000、2000、…、100000，共 100 次。
 它计算的是验证 loss；DexJoCo 闭环成功率由独立评测脚本计算，不在训练期间自动运行。

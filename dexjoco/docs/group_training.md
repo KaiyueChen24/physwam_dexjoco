@@ -47,7 +47,7 @@ cd dexjoco
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
 - `pi05_smoke.yaml`：四卡 FSDP、真实数据与 base 权重、全量微调、全局 batch 4、20 步短跑。
-- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；CPU 加载进程 16。
+- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；CPU 加载进程 32。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
 - 两份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
 - `--group`、`--gpus` 覆盖 YAML；正式配置默认 `single_arm`、`0,1,2,3,4,5,6,7`，smoke 仍使用四卡。组内六个任务各以 1/6 概率采样，共享一个模型。
@@ -204,7 +204,7 @@ set -o pipefail
 python -u scripts/train_group.py \
   --experiment configs/experiments/pi05_full.yaml \
   --group single_arm --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
-  --batch-size 256 --num-workers 16 --run-name "$RUN" \
+  --batch-size 256 --num-workers 32 --run-name "$RUN" \
   2>&1 | tee "logs/$RUN.launch.log"
 ```
 
@@ -217,9 +217,9 @@ python -u scripts/train_group.py \
 
 ## 数据加载与 GPU 空闲排查
 
-`pi05_full.yaml` 的 `num_workers` 设为 16，控制 CPU 视频解码、图像变换和组批的进程数。
-这只是起点，不保证 8 或 16 一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
-保持待测 run 的 batch、模型和数据不变，先对 4/8/16 做对照。查看当前进程可用的 CPU 逻辑核数：
+`pi05_full.yaml` 的 `num_workers` 设为 32，控制 CPU 视频解码、图像变换和组批的进程数。
+这只是起点，不保证增加进程数一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
+保持待测 run 的 batch、模型和数据不变，先对 8/16/32 做对照。查看当前进程可用的 CPU 逻辑核数：
 
 ```bash
 nproc
@@ -231,7 +231,7 @@ nproc
 
 ```bash
 RUN=pi05_single_full_8gpu_实际时间戳
-for workers in 4 8 16; do
+for workers in 8 16 32; do
   python scripts/benchmark_pi05_data.py --run-dir "runs/$RUN" \
     --num-workers "$workers" --warmup-batches 8 --batches 64
 done
@@ -246,7 +246,7 @@ done
 ```bash
 python scripts/train_group.py --experiment configs/experiments/pi05_full.yaml \
   --run-name "$RUN" --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
-  --batch-size 256 --num-workers 16 --resume
+  --batch-size 256 --num-workers 32 --resume
 ```
 
 此例假定原 run 也是八卡 FSDP=8；不能将原四卡 FSDP=4 run 直接改为八卡恢复。

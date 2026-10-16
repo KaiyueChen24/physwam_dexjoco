@@ -18,7 +18,9 @@ def test_profiles_select_full_single_arm_group_and_four_gpus(experiment, batch, 
     # resolve changes CUDA visibility, so restore the environment after each test.
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
     monkeypatch.setenv("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-    resolved = resolve(training_parser("test", experiment).parse_args([]))
+    # Budget values are explicit overrides so users can tune YAML without breaking architecture checks.
+    resolved = resolve(training_parser("test", experiment).parse_args([
+        "--batch-size", str(batch), "--steps", str(steps)]))
     assert resolved["group"]["name"] == "single_arm"
     assert resolved["group"]["tasks"] == load_group("single_arm")["tasks"]
     assert len(resolved["group"]["tasks"]) == 6

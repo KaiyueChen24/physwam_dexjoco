@@ -32,21 +32,43 @@ FastWAM 单臂动作维度为 **22**、状态 **23**；双臂动作 **44**、状
 
 ## 环境准备
 
-在独立 FastWAM 环境安装官方依赖；不把 Torch/CUDA 或 FastWAM 的 NumPy 版本装进现有仿真环境。
-下面的命令从 `~/physwam/fastwam` 执行。上游 revision 记录在 `UPSTREAM_REVISION`。
+从 PhysWAM 工作区根目录（含 dexjoco/ 和 fastwam/）执行一键安装器。
+它建立独立 FastWAM 环境；上游 revision 记录在 `fastwam/UPSTREAM_REVISION`。
 
 ```bash
-conda create -n fastwam python=3.10 -y
-conda activate fastwam
-python -m pip install -U pip
-python -m pip install torch==2.7.1+cu128 torchvision==0.22.1+cu128 \
-  --extra-index-url https://download.pytorch.org/whl/cu128
-python -m pip install -e . --extra-index-url https://download.pytorch.org/whl/cu128
-python -m pip install pyyaml 'websockets>=14,<16' msgpack pytest
-export DIFFSYNTH_MODEL_BASE_PATH="$PWD/checkpoints"
+bash dexjoco/scripts/setup_fastwam_env.sh
+
+# 新服务器需要代理及 AIFS 缓存时，换成该机可写路径：
+bash dexjoco/scripts/setup_fastwam_env.sh --setup-proxy --proxy-port 17890 \
+  --cache-dir /aifs/chenkaiyue/.cache/physwam \
+  --model-dir /aifs/chenkaiyue/models/fastwam
 ```
 
-GPU/CUDA 驱动必须与官方安装要求匹配。默认 batch=1 是每个设备的 batch，
+两个安装命令选择一个即可。已有代理用 `--proxy URL` 替代 --setup-proxy；
+也支持 --prefix、--mihomo-binary、--subscription-file、--dry-run 和 --check-gpu INDEX。
+代理管理复用 `setup_mihomo.py`，具体参数见 [环境安装参数](configuration_guide.md#环境安装参数)。
+安装器检测 Conda，缺失时安装 Miniforge；创建/复用 Python 3.10 环境，安装 FFmpeg 7、
+编译工具、PyTorch 2.7.1+cu128、DeepSpeed 0.18.7、FastWAM 和轻量 openpi-client。
+FastWAM 的依赖版本来自 `fastwam/pyproject.toml`；附加工具受
+`configs/environments/fastwam_constraints.txt` 约束，完整版本写入安装日志旁的 versions.json。
+Torch 先安装；DeepSpeed 在该环境中构建，安装阶段隐藏 GPU、关闭预编译自定义扩展。
+默认检查 pip 依赖、CPU 参数更新、小视频解码、Parquet/消息传输和训练配方解析，不需要空闲 GPU。
+`--check-gpu 0` 另验证指定单卡 BF16 前向/反向及 NCCL 可用性，不启动多卡通信或完整训练。
+
+按脚本输出加载 Conda，然后在每个新终端激活并加载本机设置：
+
+```bash
+conda activate fastwam
+source "$HOME/.config/physwam/fastwam-env.sh"
+```
+
+该文件独立于 pi05-env.sh，记录代理、HF/ModelScope/扩展缓存及 Wan 模型目录，
+默认模型下载源为 huggingface，可用 --model-source modelscope 改变。
+--model-dir 控制 Wan 组件位置，默认 `fastwam/checkpoints/`；生成的 ActionDiT 骨干仍位于
+`fastwam/checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt`。
+安装器不下载数据/模型、不初始化骨干，不执行训练；后续 initialize/train 会按需下载组件。
+安装阶段不修改 NVIDIA 驱动或系统 CUDA；完整模型的显存和 DeepSpeed 运行链路需服务器 smoke 验证。
+默认 batch=1 是每个设备的 batch，
 不是显存容量保证。有效全局 batch 还要乘 GPU 数量与梯度累积次数。
 `fastwam` 环境使用 on-the-fly T5 编码，第一版不需要预生成文本缓存。
 服务端按任务缓存文本条件，但每次观测仍重新编码视觉条件。
@@ -93,7 +115,7 @@ python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage prepare
 # 每任务解码一个真实序列，输出首尾画面和张量形状
 python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage inspect
 
-# 首次准备一次：只使用首个可见 GPU；文件已存在时跳过，不覆盖
+# 首次准备一次：只使用首个可见 GPU；骨干已存在时手动跳过此命令，入口会拒绝覆盖
 python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage initialize
 
 # 启动四个训练进程，训练 20 步

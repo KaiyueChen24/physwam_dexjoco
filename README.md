@@ -15,6 +15,43 @@ physwam/
 - [DexJoCo 原项目说明](dexjoco/README.md)
 - [FastWAM 原项目说明](fastwam/README.md)
 
+## 一键配置 FastWAM 环境
+
+从工作区根目录执行：
+
+```bash
+bash dexjoco/scripts/setup_fastwam_env.sh
+```
+
+默认建立或复用 Python 3.10 的 `fastwam` 环境，缺少 Conda 时安装 Miniforge。
+安装 FFmpeg 7、编译工具、PyTorch 2.7.1 CUDA 12.8、DeepSpeed 及 FastWAM 的固定版本依赖，
+并安装策略服务使用的轻量 `openpi-client`。安装后执行 pip check、CPU 优化器更新、
+真实小视频解码、Parquet/MessagePack 往返和两份 FastWAM 配方的 dry-run 检查。
+默认隐藏 GPU，不下载模型权重或数据；此环境与 π0.5 和仿真环境分别安装。
+
+新服务器需要安装/启动代理并使用 AIFS 缓存时，路径换成该机已挂载、可写的个人目录：
+
+```bash
+bash dexjoco/scripts/setup_fastwam_env.sh --name fastwam \
+  --setup-proxy --proxy-port 17890 \
+  --cache-dir /aifs/chenkaiyue/.cache/physwam \
+  --model-dir /aifs/chenkaiyue/models/fastwam
+```
+
+已有代理时用 `--proxy http://127.0.0.1:17890` 替代 `--setup-proxy --proxy-port 17890`。
+代理离线二进制、订阅文件参数与 π0.5 安装器相同，复用 `setup_mihomo.py`。
+`--model-dir` 仅指定 Wan 组件目录；ActionDiT 初始化骨干仍在 `fastwam/checkpoints/`。
+每次新开终端，按安装器打印的 Conda source 命令加载 Conda，再执行：
+
+```bash
+conda activate fastwam
+source "$HOME/.config/physwam/fastwam-env.sh"
+```
+
+先查看计划可加 `--dry-run`；有空闲 GPU 时可加 `--check-gpu 0` 验证单卡 BF16 前向/反向。
+该检查不替代四卡 smoke 训练。安装后按 [FastWAM 接入说明](dexjoco/docs/fastwam_integration.md#数据与首次短跑)
+准备数据并执行 prepare/inspect/initialize/train。
+
 ## 一键配置 π0.5 环境
 
 克隆后从工作区根目录执行：

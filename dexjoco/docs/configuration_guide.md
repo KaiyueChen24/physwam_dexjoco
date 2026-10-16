@@ -34,14 +34,15 @@
 
 ## 环境安装参数
 
-从工作区根目录运行 `bash dexjoco/scripts/setup_pi05_env.sh`。
-固定版本文件为 `configs/environments/pi05_constraints.txt`，每行已标注中文类别。
+从工作区根目录运行 `bash dexjoco/scripts/setup_pi05_env.sh` 或 `bash dexjoco/scripts/setup_fastwam_env.sh`。
+π0.5 的固定版本文件为 `configs/environments/pi05_constraints.txt`。
+FastWAM 的训练依赖版本来自 `fastwam/pyproject.toml`，附加工具版本为 `configs/environments/fastwam_constraints.txt`。
 这是关键依赖约束；Conda 及其他传递依赖仍由包管理器解析，不是跨平台的完整锁文件。
-安装完成时会生成完整 Python 包版本记录 `setup-pi05.*.versions.json`。
+安装完成时生成完整 Python 包版本记录 `setup-pi05.*.versions.json` 或 `setup-fastwam.*.versions.json`。
 
 | 参数 | 类别 | 默认值与用途 |
 |---|---|---|
-| `--name` | 环境/名称 | 默认 pi05；创建或复用 Python 3.11 环境，拒绝 base |
+| `--name` | 环境/名称 | π0.5 默认 pi05/Python 3.11；FastWAM 默认 fastwam/Python 3.10；拒绝 base |
 | `--prefix` | 环境/路径 | 可选完整路径；与显式 --name 互斥，可将环境放在个人 AIFS 目录 |
 | `--proxy` | 网络/已有代理 | 默认继承终端设置；显式 HTTP/HTTPS 代理用于安装，并写入本机环境文件供后续 source；与 --setup-proxy 互斥 |
 | `--setup-proxy` | 网络/Mihomo 安装与启动 | 默认关闭；先准备 Mihomo 并验证 HTTPS 出口，再安装 Conda/依赖 |
@@ -49,16 +50,22 @@
 | `--mihomo-binary` | 网络/离线准备 | 可选已上传的 Linux amd64 二进制或 .gz；需 --setup-proxy，解决代理尚未启动时无法访问 GitHub 的问题 |
 | `--subscription-file` | 网络/订阅来源 | 可选已下载的 Clash/Mihomo 订阅文件；需 --setup-proxy；缺省时复用已保存订阅，否则隐藏输入链接并下载 |
 | `--cache-dir` | 缓存/AIFS、日志 | 默认 `$XDG_CACHE_HOME/physwam` 或 `~/.cache/physwam`；包含下表中的缓存与安装记录，换机时传入新路径 |
-| `--check-gpu` | GPU/验证 | 默认关闭；传入单个 GPU 编号，仅对该卡做 JAX 运算检查 |
+| `--model-dir` | 权重/缓存 | 仅 FastWAM：Wan 组件目录，默认 fastwam/checkpoints；不改变 ActionDiT 骨干和训练输出路径 |
+| `--model-source` | 权重/下载源 | 仅 FastWAM：huggingface（默认）或 modelscope，供后续模型初始化/加载使用 |
+| `--check-gpu` | GPU/验证 | 默认关闭；传入单个 GPU 编号，π0.5 检查 JAX，FastWAM 检查 BF16 前向/反向及 NCCL 可用性 |
 | `--dry-run` | 安装/计划 | 不下载、不安装、不提示输入订阅、不创建文件，只显示计划 |
 
 默认检查在 CPU 上执行，安装阶段不需要空闲 GPU。安装器不修改 `.bashrc`；完成后按输出激活环境。
 `evdev` 在 pip 前通过 Conda 安装二进制包，避免混用 Linux 头文件引起 `KEY_LINK_PHONE` 编译错误。
+上述 evdev 仅适用于 π0.5；FastWAM 安装器不安装 OpenPI 模型、JAX 或仿真依赖。
+FastWAM 按 Torch → DeepSpeed → FastWAM/轻量客户端顺序安装，默认检查实际小视频解码、
+Parquet、消息传输和两份训练配方的 dry-run。单卡自检不替代四卡 DeepSpeed smoke。
 
 ### 每台服务器的缓存与代理
 
-参数不写入训练 YAML。安装成功时生成 `~/.config/physwam/pi05-env.sh`，文件权限为 600。
-每次激活环境后 `source "$HOME/.config/physwam/pi05-env.sh"`，下载和训练进程即可继承该机设置。
+参数不写入训练 YAML。安装成功时分别生成 `~/.config/physwam/pi05-env.sh`、
+`~/.config/physwam/fastwam-env.sh`，文件权限为 600，互不覆盖。
+每次激活环境后 source 对应文件，下载和训练进程即可继承该机设置。
 不指定 --proxy/--setup-proxy 时仅继承当前 shell 代理，不将其保存到环境文件。
 重新运行安装器会替换此环境文件；已下载的缓存文件保留。
 
@@ -70,6 +77,10 @@
 | `HF_HUB_CACHE` | 数据与权重/Hub 文件缓存 | `PATH/huggingface/hub` |
 | `HF_DATASETS_CACHE` | 数据/HF datasets 缓存 | `PATH/huggingface/datasets` |
 | `OPENPI_DATA_HOME` | 权重/OpenPI 下载缓存 | `PATH/openpi` |
+| `MODELSCOPE_CACHE` | 权重/FastWAM ModelScope 缓存 | `PATH/modelscope` |
+| `TORCH_EXTENSIONS_DIR`、`TRITON_CACHE_DIR` | GPU/FastWAM 编译缓存 | `PATH/torch_extensions`、`PATH/triton` |
+| `DIFFSYNTH_MODEL_BASE_PATH` | 权重/FastWAM Wan 组件 | --model-dir；默认 fastwam/checkpoints，不随 --cache-dir 自动迁移 |
+| `DIFFSYNTH_DOWNLOAD_SOURCE` | 权重/FastWAM 下载源 | --model-source；默认 huggingface |
 | 安装日志、包版本 JSON | 日志/安装记录 | `PATH/logs` |
 
 安装器不会挂载 AIFS、调整配额、搬迁已有缓存或改变项目数据路径。

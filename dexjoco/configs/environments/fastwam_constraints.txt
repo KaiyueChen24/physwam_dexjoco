@@ -1,0 +1,9 @@
+# FastWAM 的模型/训练依赖版本以同级 fastwam/pyproject.toml 为准，避免重复维护。
+# 本文件补充安装工具、DexJoCo 配置、轻量客户端传输与测试工具的版本。
+# setup_fastwam_env.sh 使用 pip -c；完整安装结果另写入 versions.json。
+setuptools==80.9.0          # [安装/构建] DeepSpeed 的源码构建工具
+wheel==0.45.1              # [安装/构建] wheel 构建支持
+PyYAML==6.0.2              # [配置] 分组训练启动器读取 YAML
+websockets==15.0.1         # [部署/传输] 支持 websockets.asyncio 服务接口
+msgpack==1.1.1             # [部署/传输] NumPy/MessagePack 编解码
+pytest==8.3.5              # [验证/测试] CPU 框架和安装器测试

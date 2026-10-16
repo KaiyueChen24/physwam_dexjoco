@@ -177,6 +177,53 @@ python scripts/train_group.py --run-name single_full --resume
 支持恢复模型、优化器、随机步计数；上游 reader/sampler 迭代游标未持久化，因此不保证数据顺序逐帧复现。
 checkpoint 位于 `runs/<run-name>/checkpoints/pi05_<group>_multitask/<run-name>/<step>/`。
 
+## W&B 登录、GPU 与 loss 监控
+
+正式配方 `pi05_full.yaml` 默认 `wandb_enabled: true`、`wandb_project: physwam_dexjoco`。
+`wandb_project` 由分组入口传入 OpenPI；未提供该字段的历史配方仍使用 `openpi` 项目。
+所属个人/团队沿用登录账号，也可在终端用 `WANDB_ENTITY` 指定有写权限的团队。
+专用 smoke 脚本用于本地链路检查，不调用正式训练器的 W&B 初始化。
+
+先在服务器 pi05 环境登录；API key 仅在交互提示中输入，不写进 YAML、Git 或命令行：
+
+```bash
+conda activate pi05
+source "$HOME/.config/physwam/pi05-env.sh"
+export WANDB_MODE=online
+wandb login
+```
+
+云端 API key 可在 https://wandb.ai/authorize 获取。
+使用当前节点已经配置的代理；`WANDB_DIR` 可指向 AIFS 上的可写目录以保存本地同步文件。
+训练启动后控制台会打印 run 链接，run 名称来自 `--run-name`。
+
+| 内容 | W&B 指标/位置 | 当前正式配方的频率 |
+|---|---|---|
+| GPU 利用率、显存、温度、功耗 | System 面板，按 GPU 展示；具体项目取决于 NVML/驱动可见性 | W&B 按时间周期采样，与训练 log_interval 独立 |
+| 总训练 loss | `loss` | 每 log_interval 次更新记录上一段训练 batch 的平均值，最后一步也记录 |
+| 梯度与矩阵参数范数 | `grad_norm`、`param_norm` | 与总训练 loss 同步 |
+| 总验证 loss | `val/loss` | 每 validation_interval 次更新及训练结束时 |
+| 各任务验证 loss | `val/water_plant/loss` 等六条曲线 | 与总验证 loss 同步 |
+| 输入相机样本 | `camera_views` | step 0，最多五条样本的相机拼图 |
+| 实验配置 | run Config | 初始化时记录 |
+
+训练器通过 W&B Settings 将 GPU 监控限制到 `--gpus` 指定的数字编号；
+例如 π0.5 使用 0,1,2,3 时，不将另一组 FastWAM 使用的 4,5,6,7 纳入该 run。
+GPU 系统指标通常以时间为横轴，loss 以已完成的优化器更新次数为横轴。
+这不是逐任务训练 loss；当前需求采用逐任务验证 loss 衡量每个任务的留出集表现。
+
+正式配置 `validation_ratio: 0.1` 按完整 episode 留出，`validation_max_batches: null` 遍历全部留出帧；
+同一模型依次计算六任务的验证 loss，不更新模型，最终 `val/loss` 为六个任务平均 loss 的等权平均。
+训练预算由 num_train_steps 指定；例如 100000 步、验证间隔 1000 时，验证发生在 1000、2000、…、100000，共 100 次。
+它计算的是验证 loss；DexJoCo 闭环成功率由独立评测脚本计算，不在训练期间自动运行。
+完整验证可能花费较长时间，期间训练更新暂停，GPU 利用率与训练阶段可能不同。
+
+训练、验证及 checkpoint 都按已完成的更新次数编号；同一更新上的训练与验证指标合并为一次 W&B 提交。
+每 save_interval 次更新保存 checkpoint；keep_period 只保留实际存在且编号为其倍数的保存点，此外保留最新一个。
+例如 save_interval=4000、keep_period=10000 时，长期保留点为 20000、40000 等；不会补存 10000、30000 等未触发保存的步数。
+W&B run ID 保存在 checkpoint 根目录的 `wandb_id.txt`，配合原 run 的 `--resume` 继续记录。
+这些指标不会自动把大型 checkpoint 上传为 W&B Artifact；模型文件仍保存在 AIFS 的 run 目录。
+
 ## 部署与批量评测
 
 部署指 DexJoCo 仿真中的闭环推理。可以将整个 `runs/<run-name>/` 复制回本地，

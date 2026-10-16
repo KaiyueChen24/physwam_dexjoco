@@ -183,6 +183,7 @@ def build_train_config(resolved, resume=False):
     run_dir = Path(resolved["run_dir"])
     return cfg.TrainConfig(
         name=f"pi05_{group['name']}_multitask", exp_name=resolved["run_name"], validation=validation,
+        project_name=exp.get("wandb_project", "openpi"),  # [日志/项目] 历史配置保持默认 openpi。
         model=model, data=make_data_factory(group), weight_loader=loader,
         # full 的过滤器为 nnx.Nothing，视觉、语言、动作参数全部参与更新。
         # lora 沿用模型的冻结规则，视觉编码器仍可训练。

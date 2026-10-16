@@ -68,9 +68,10 @@ def subscription_bytes(supplied=None):
     if supplied:
         content = Path(supplied).expanduser().read_bytes()
     else:
-        # /dev/tty 保证用户整段粘贴安装命令时，不会误读后续 shell 命令。
+        # stream 只用于输出提示；getpass 自行从控制终端读取并关闭回显。
+        # TTY 不可 seek，不能使用 Python 文本 r+ 模式，否则会误报为无交互终端。
         try:
-            with open("/dev/tty", "r+") as tty:
+            with open("/dev/tty", "w") as tty:
                 url = getpass.getpass("粘贴 Clash/Mihomo 订阅链接后回车（不显示）：", stream=tty).strip()
         except OSError:
             raise RuntimeError("无交互终端；请通过 --subscription-file 提供已下载的订阅文件") from None

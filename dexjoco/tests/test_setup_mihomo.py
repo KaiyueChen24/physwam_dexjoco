@@ -177,3 +177,94 @@ def test_proxy_check_uses_explicit_proxy_and_rejects_failed_egress(monkeypatch):
         mihomo.proxy_check(18888)
     assert 'http://127.0.0.1:18888' in calls[0][0]
     assert calls[0][1]['stdout'] == subprocess.DEVNULL
+
+
+def test_subscription_prompt_works_on_real_terminal_without_echo(tmp_path):
+    """使用真实 PTY，防止将不可 seek 的终端误报为无交互终端。"""
+    import errno
+    import fcntl
+    import pty
+    import select
+    import sys
+    import termios
+    import time
+
+    child_code = '''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("bootstrap", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class Response:
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+    def read(self): return b"proxies: []"
+class Opener:
+    def open(self, request, timeout):
+        assert request.full_url == "https://example.invalid/hidden-terminal-fixture"
+        return Response()
+module.urllib.request.build_opener = lambda *args: Opener()
+assert module.subscription_bytes() == b"proxies: []"
+print("TTY_SUBSCRIPTION_OK", flush=True)
+'''
+    master, slave = pty.openpty()
+    def attach_terminal():
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+    child = None
+    output = bytearray()
+    supplied = False
+    try:
+        child = subprocess.Popen([sys.executable, '-c', child_code, str(SCRIPT)],
+            stdin=slave, stdout=slave, stderr=slave, preexec_fn=attach_terminal,
+            cwd=tmp_path)
+        os.close(slave)
+        slave = None
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if select.select([master], [], [], 0.1)[0]:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        break
+                    raise
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if b'Clash/Mihomo' in output and not supplied:
+                    os.write(master, b'https://example.invalid/hidden-terminal-fixture\n')
+                    supplied = True
+            if child.poll() is not None and not select.select([master], [], [], 0)[0]:
+                break
+        assert child.wait(timeout=2) == 0, output.decode(errors='replace')
+        assert supplied and b'TTY_SUBSCRIPTION_OK' in output
+        assert b'hidden-terminal-fixture' not in output
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill()
+            child.wait()
+        os.close(master)
+        if slave is not None:
+            os.close(slave)
+
+
+def test_subscription_without_terminal_reports_file_option(tmp_path):
+    import sys
+    child_code = '''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("bootstrap", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+try:
+    module.subscription_bytes()
+except RuntimeError as error:
+    assert "--subscription-file" in str(error)
+    print("NO_TTY_HANDLED")
+else:
+    raise AssertionError("expected missing terminal")
+'''
+    result = subprocess.run([sys.executable, '-c', child_code, str(SCRIPT)],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        start_new_session=True, cwd=tmp_path, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert 'NO_TTY_HANDLED' in result.stdout

@@ -1,6 +1,7 @@
 import dataclasses
 import functools
 import logging
+import os
 import platform
 from typing import Any
 
@@ -55,14 +56,23 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
     ckpt_dir = config.checkpoint_dir
     if not ckpt_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory {ckpt_dir} does not exist.")
+    # [日志/GPU] 仅监控当前进程可见的物理卡，避免混入同节点其他实验的 GPU。
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    gpu_ids = None
+    if visible is not None:
+        parts = [part.strip() for part in visible.split(",") if part.strip()]
+        if all(part.isdecimal() for part in parts):
+            gpu_ids = [int(part) for part in parts]
+    settings = wandb.Settings(x_stats_gpu_device_ids=gpu_ids)
     if resuming:
         run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
-        wandb.init(id=run_id, resume="must", project=config.project_name)
+        wandb.init(id=run_id, resume="must", project=config.project_name, settings=settings)
     else:
         wandb.init(
             name=config.exp_name,
             config=dataclasses.asdict(config),
             project=config.project_name,
+            settings=settings,
         )
         (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
 
@@ -274,26 +284,31 @@ def main(config: _config.TrainConfig):
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
         infos.append(info)
-        if step % config.log_interval == 0:
+        # [日志/步数] 训练、验证、checkpoint 统一使用已经完成的优化器更新次数。
+        completed_step = int(train_state.step)
+        logged_metrics = {}
+        if completed_step % config.log_interval == 0 or completed_step == config.num_train_steps:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             if not all(np.isfinite(float(value)) for value in reduced_info.values()):
-                raise FloatingPointError(f"Nonfinite training metrics at step {step}")
+                raise FloatingPointError(f"Nonfinite training metrics at step {completed_step}")
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
-            pbar.write(f"Step {step}: {info_str}")
-            wandb.log(reduced_info, step=step)
+            pbar.write(f"Step {completed_step}: {info_str}")
+            logged_metrics.update(reduced_info)
             infos = []
         batch = next(data_iter)
 
-        completed_step = int(train_state.step)
         if validation and (completed_step % config.validation["interval"] == 0 or completed_step == config.num_train_steps):
             result = validation.evaluate(train_state.params, completed_step)
             logging.info("[validation] step=%d val_loss=%.6f tasks=%s", completed_step, result["val_loss"], result["task_losses"])
-            wandb.log({"val/loss": result["val_loss"],
-                       **{f"val/{task}/loss": value for task, value in result["task_losses"].items()}}, step=completed_step)
+            logged_metrics.update({"val/loss": result["val_loss"],
+                                   **{f"val/{task}/loss": value for task, value in result["task_losses"].items()}})
+        # 同一步的训练/验证合并提交；W&B 默认 commit 后不接受同 step 的第二条记录。
+        if logged_metrics:
+            wandb.log(logged_metrics, step=completed_step)
 
-        if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+        if completed_step % config.save_interval == 0 or completed_step == config.num_train_steps:
+            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, completed_step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()

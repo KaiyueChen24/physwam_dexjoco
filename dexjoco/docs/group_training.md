@@ -47,7 +47,7 @@ cd dexjoco
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
 - `pi05_smoke.yaml`：四卡 FSDP、真实数据与 base 权重、全量微调、全局 batch 4、20 步短跑。
-- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 128、100,000 步；CPU 加载进程 16。
+- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；CPU 加载进程 16。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
 - 两份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
 - `--group`、`--gpus` 覆盖 YAML；正式配置默认 `single_arm`、`0,1,2,3,4,5,6,7`，smoke 仍使用四卡。组内六个任务各以 1/6 概率采样，共享一个模型。
@@ -152,7 +152,7 @@ python scripts/train_group.py --stage prepare --run-name single_full
 # 分组计算统计（train 阶段在统计不存在时也会自动计算）
 python scripts/train_group.py --stage stats --run-name single_full
 
-# 正式全量微调：默认八卡 FSDP、全局 batch 128（每卡 16 条样本）
+# 正式全量微调：默认八卡 FSDP、全局 batch 256（每卡 32 条样本）
 python scripts/train_group.py --run-name single_full
 ```
 
@@ -204,21 +204,22 @@ set -o pipefail
 python -u scripts/train_group.py \
   --experiment configs/experiments/pi05_full.yaml \
   --group single_arm --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
-  --batch-size 128 --num-workers 16 --run-name "$RUN" \
+  --batch-size 256 --num-workers 16 --run-name "$RUN" \
   2>&1 | tee "logs/$RUN.launch.log"
 ```
 
 这是新 run，从 base 权重开始，不加 `--resume`；不需要 nohup 或 `&`。
 先按 `Ctrl+B`，松开后按 `D` 可退出查看而保留训练；`tmux attach -t pi05_8gpu` 返回会话。
 在训练窗口直接按 `Ctrl+C` 会停止前台训练；tmux 不会在进程被终止时自动保存 checkpoint。
-`tmux ls` 查看会话。batch 仍为 128，学习率、100000 步预算、验证和保存间隔均保持原设置；
+`tmux ls` 查看会话。batch 为 256，学习率、100000 步预算、验证和保存间隔均保持原设置；
+相对 batch 128，固定步数下的训练采样总量翻倍；如需对照相同样本预算，应另行配置步数和预热。
 八卡的提速幅度需实测，数据供应不足时增加 GPU 不能消除等待。
 
 ## 数据加载与 GPU 空闲排查
 
 `pi05_full.yaml` 的 `num_workers` 设为 16，控制 CPU 视频解码、图像变换和组批的进程数。
 这只是起点，不保证 8 或 16 一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
-保持 batch=128、模型和数据不变，先对 4/8/16 做对照。查看当前进程可用的 CPU 逻辑核数：
+保持待测 run 的 batch、模型和数据不变，先对 4/8/16 做对照。查看当前进程可用的 CPU 逻辑核数：
 
 ```bash
 nproc
@@ -226,7 +227,7 @@ nproc
 
 在暂停训练后测试，避免争用 CPU/I/O 污染对比。以下命令只读取已有 run 的训练划分、batch 和归一化资产，
 不加载 base 权重或模型，不启动 W&B，不占用 GPU，也不覆盖原 run；需先有 `norm_stats.json`。
-单次脚本结束会退出加载进程。示例中的 run-name 替换为实际 batch 128 实验：
+单次脚本结束会退出加载进程。示例中的 run-name 替换为实际 batch 256 实验：
 
 ```bash
 RUN=pi05_single_full_8gpu_实际时间戳
@@ -245,7 +246,7 @@ done
 ```bash
 python scripts/train_group.py --experiment configs/experiments/pi05_full.yaml \
   --run-name "$RUN" --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
-  --batch-size 128 --num-workers 16 --resume
+  --batch-size 256 --num-workers 16 --resume
 ```
 
 此例假定原 run 也是八卡 FSDP=8；不能将原四卡 FSDP=4 run 直接改为八卡恢复。

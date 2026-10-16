@@ -15,7 +15,7 @@ from group_common import (build_train_config, get_finetune_mode, load_group, rea
 
 
 @pytest.mark.parametrize("experiment,batch,steps,gpus,fsdp", [
-    ("pi05_full", 128, 100000, "0,1,2,3,4,5,6,7", 8),
+    ("pi05_full", 256, 100000, "0,1,2,3,4,5,6,7", 8),
     ("pi05_smoke", 4, 20, "0,1,2,3", 4),
 ])
 def test_profiles_select_full_single_arm_group_and_expected_gpu_layout(experiment, batch, steps, gpus, fsdp, monkeypatch):
@@ -153,7 +153,7 @@ def test_worker_count_change_requires_explicit_resume_and_is_recorded(tmp_path, 
     assert len((tmp_path / "runtime_changes.jsonl").read_text().splitlines()) == 1
 
 
-@pytest.mark.parametrize("field,value", [("batch_size", 256), ("learning_rate", 1e-4),
+@pytest.mark.parametrize("field,value", [("batch_size", 512), ("learning_rate", 1e-4),
                                        ("sampling", "frame_uniform"), ("finetune_mode", "lora")])
 def test_worker_tuning_does_not_allow_other_resume_changes(tmp_path, field, value):
     resolved = resolve(training_parser("test").parse_args(["--run-name", "workers"]))

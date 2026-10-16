@@ -1,17 +1,20 @@
-# π0.5 正式训练配置：由 scripts/train_group.py 读取。
+# π0.5 单臂全部六任务全量微调：由 scripts/train_group.py 默认读取。
 # 优先级：已支持的命令行选项 > 本文件；任务、相机和维度见 configs/task_groups/。
 # 部署（serve）、闭环评测（eval）的命令行参数见 docs/configuration_guide.md。
 
 # 【配置格式 / config】
 schema_version: 1                       # [配置格式] 配置结构版本，目前仅接受 1。
 model: pi05                             # [模型] 使用 π0.5；当前入口仅支持 pi05。
+finetune_mode: full                     # [训练/更新范围] 全量更新视觉、语言、动作模块，不使用 LoRA。
+group: single_arm                      # [任务选择] 联合训练 single_arm.yaml 中全部六个任务，共享一个策略。
 
 # 【模型 / model】
 action_horizon: 30                      # [模型/动作序列] 一次预测 30 步动作，沿用 DexJoCo baseline。
 max_token_len: 250                      # [模型/文本] 任务指令与离散状态的 token 总长度上限；不含图像 token。
 
 # 【GPU 与并行 / gpu】
-fsdp_devices: 1                         # [GPU/参数分片] 每个分片组的卡数；1 不分片，实际用卡由 --gpus 指定。
+gpus: "0,1,2,3"                        # [GPU/可见卡] 默认使用四张卡；--gpus 可覆盖。
+fsdp_devices: 4                         # [GPU/参数分片] 四卡组成一个 FSDP 分片组；须整除可见卡数。
 
 # 【数据 / data】
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。

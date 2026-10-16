@@ -63,12 +63,20 @@ def require_real_data(config):
         config.pop(key, None)
 
 
-def training_parser(description, default_experiment="h100_lora"):
+def get_finetune_mode(experiment):
+    # Historical configs/snapshots used LoRA before this field existed.
+    mode = experiment.get("finetune_mode", "lora")
+    if mode not in ("full", "lora"):
+        raise ValueError("finetune_mode must be full or lora")
+    return mode
+
+
+def training_parser(description, default_experiment="pi05_full"):
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--group", choices=("single_arm", "dual_arm"), required=True, help='[任务选择] 选择单臂或双臂任务组。')
+    parser.add_argument("--group", choices=("single_arm", "dual_arm"), help='[任务选择] 覆盖实验 YAML 的任务组；组内全部任务联合训练。')
     parser.add_argument("--experiment", default=f"configs/experiments/{default_experiment}.yaml", help='[配置与实验] 实验 YAML 路径；相对路径以 DexJoCo 仓库根目录为准。')
     parser.add_argument("--run-name", help='[配置与实验] 实验目录名，结果写入 runs/<名称>/。')
-    parser.add_argument("--gpus", default="0", help='[GPU 与并行] 可见 GPU 编号，逗号分隔，例如 0,1；不是 GPU 数量。')
+    parser.add_argument("--gpus", help='[GPU 与并行] 覆盖实验 YAML 的可见 GPU 编号，逗号分隔；旧配置未设置时使用 0。')
     parser.add_argument("--dataset-root", help='[数据与 CPU] 覆盖任务数据根目录；相对路径以 DexJoCo 仓库根目录为准。')
     parser.add_argument("--checkpoint", help='[权重与结果保存] π0.5 初始化 params 目录，覆盖 YAML 中该任务组的路径。')
     parser.add_argument("--batch-size", type=int, help='[训练] 覆盖 YAML 的全局 batch（所有 GPU 合计）。')
@@ -81,18 +89,29 @@ def training_parser(description, default_experiment="h100_lora"):
 
 
 def resolve(args):
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
-    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-    group = load_group(args.group)
     experiment = read_yaml(repo_path(args.experiment))
     if experiment.get("model") != "pi05":
         raise ValueError("Only pi05 is implemented by this training entry point")
+    experiment["finetune_mode"] = get_finetune_mode(experiment)
+    group_name = args.group or experiment.get("group")
+    if group_name not in ("single_arm", "dual_arm"):
+        raise ValueError("Set group in the experiment YAML or pass --group single_arm/dual_arm")
+    group = load_group(group_name)
+    gpus = args.gpus if args.gpus is not None else experiment.get("gpus", "0")
+    if not isinstance(gpus, str):
+        raise ValueError('gpus must be a quoted, comma-separated string, e.g. "0,1,2,3"')
+    gpu_ids = [part.strip() for part in gpus.split(",")]
+    if any(not part.isascii() or not part.isdecimal() for part in gpu_ids):
+        raise ValueError("gpus must contain nonnegative GPU indices")
+    if len({int(part) for part in gpu_ids}) != len(gpu_ids):
+        raise ValueError("gpus must not contain duplicate GPU indices")
+    gpus = ",".join(gpu_ids)
     for flag, key in (("batch_size", "batch_size"), ("steps", "num_train_steps"),
                       ("num_workers", "num_workers"), ("fsdp_devices", "fsdp_devices")):
         value = getattr(args, flag, None)
         if value is not None:
             experiment[key] = value
-    validation_settings(experiment)  # [验证/loss] 在访问数据或启动 GPU 前校验参数。
+    validation = validation_settings(experiment)  # 在访问数据或启动 GPU 前校验参数。
     require_real_data(experiment)
     for key in ("batch_size", "num_train_steps", "action_horizon", "fsdp_devices", "stats_samples",
                 "stats_batch_size", "log_interval", "save_interval"):
@@ -100,6 +119,10 @@ def resolve(args):
             raise ValueError(f"{key} must be positive")
     if experiment["num_workers"] < 0 or experiment["warmup_steps"] < 0:
         raise ValueError("num_workers and warmup_steps must be nonnegative")
+    if experiment["batch_size"] % len(gpu_ids) or len(gpu_ids) % experiment["fsdp_devices"]:
+        raise ValueError("Global batch must be divisible by GPU count; fsdp_devices must divide GPU count")
+    if validation["ratio"] > 0 and validation["batch_size"] % len(gpu_ids):
+        raise ValueError("validation_batch_size must be divisible by GPU count")
     if experiment["sampling"] not in ("task_balanced", "frame_uniform"):
         raise ValueError("Unknown sampling mode")
     if experiment["stats_samples"] < len(group["tasks"]):
@@ -111,11 +134,13 @@ def resolve(args):
             group[key] = experiment[key]
     checkpoint = args.checkpoint or experiment["checkpoint_paths"][group["name"]]
     experiment["initialization_params"] = str(repo_path(checkpoint))
-    run_name = args.run_name or f"pi05_{args.group}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = args.run_name or f"pi05_{group_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     if Path(run_name).name != run_name or run_name in (".", ".."):
         raise ValueError("run-name must be a simple directory name")
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     return {"schema_version": 1, "group": group, "experiment": experiment, "run_name": run_name,
-            "gpus": args.gpus, "run_dir": str(ROOT / "runs" / run_name)}
+            "gpus": gpus, "run_dir": str(ROOT / "runs" / run_name)}
 
 
 def resolve_training_split(resolved):
@@ -147,17 +172,20 @@ def build_train_config(resolved, resume=False):
         options = validation_settings(exp)
         validation = {**options, "group": resolved["validation_group"], "sampling": exp["sampling"],
                       "output_path": str(Path(resolved["run_dir"]) / "validation_loss.jsonl")}
-    # [模型/LoRA] 语言侧 rank=16、alpha=16；动作侧 rank=32、alpha=32，定义在 gemma.py。
+    mode = get_finetune_mode(exp)
+    # full 使用标准骨干，不插入 LoRA；历史快照缺失字段时仍按 LoRA 构建。
+    suffix = "_lora" if mode == "lora" else ""
     model = Pi0Config(pi05=True, action_dim=group["model_action_dim"],
                       action_horizon=exp["action_horizon"], max_token_len=exp["max_token_len"],
-                      paligemma_variant="gemma_2b_lora",
-                      action_expert_variant="gemma_300m_lora")
+                      paligemma_variant=f"gemma_2b{suffix}",
+                      action_expert_variant=f"gemma_300m{suffix}")
     loader = weight_loaders.CheckpointWeightLoader(exp["initialization_params"])
     run_dir = Path(resolved["run_dir"])
     return cfg.TrainConfig(
         name=f"pi05_{group['name']}_multitask", exp_name=resolved["run_name"], validation=validation,
         model=model, data=make_data_factory(group), weight_loader=loader,
-        # [训练/冻结] 沿用模型的 LoRA 过滤器，视觉编码器仍可训练。
+        # full 的过滤器为 nnx.Nothing，视觉、语言、动作参数全部参与更新。
+        # lora 沿用模型的冻结规则，视觉编码器仍可训练。
         # [训练/EMA] ema_decay=None 关闭参数指数移动平均。
         freeze_filter=model.get_freeze_filter(), ema_decay=None,
         # [训练/学习率] 预热后保持常数：peak_lr 与 decay_lr 使用同一个 YAML 值。
@@ -174,7 +202,7 @@ def build_train_config(resolved, resume=False):
         assets_base_dir=str(run_dir / "assets"), checkpoint_base_dir=str(run_dir / "checkpoints"),
         policy_metadata={"group": group["name"], "robot_type": group["robot_type"],
                          "tasks": [t["name"] for t in group["tasks"]],
-                         "data_source": "lerobot",
+                         "data_source": "lerobot", "finetune_mode": mode,
                          "action_horizon": exp["action_horizon"]},
     )
 
@@ -261,6 +289,7 @@ def read_run(run_dir):
     run_dir = repo_path(run_dir)
     resolved = read_yaml(run_dir / "resolved_config.yaml")
     require_real_data(resolved["experiment"])
+    resolved["experiment"]["finetune_mode"] = get_finetune_mode(resolved["experiment"])
     require_real_data(resolved["group"])
     if resolved.get("validation_group"):
         require_real_data(resolved["validation_group"])

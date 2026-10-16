@@ -1,0 +1,24 @@
+# π0.5 训练/服务环境的关键版本约束；面向 Linux x86_64、Python 3.11、CUDA 12。
+# 由 setup_pi05_env.sh 的 pip -c 读取；完整安装结果另写入 versions.json。
+# Conda 先安装 evdev 二进制包；脚本中的 Conda 规格需与此处 evdev 版本一致。
+
+numpy==2.2.6                   # [数值计算] OpenPI 与 LeRobot 使用 NumPy 2
+jax==0.5.3                     # [GPU/JAX] 与仓库模型代码匹配
+jaxlib==0.5.3                  # [GPU/JAX] 与 jax 保持相同版本
+flax==0.10.2                   # [模型/NNX] 参数与训练状态接口
+optax==0.2.5                   # [训练/优化器] 约束与 JAX 兼容的版本
+equinox==0.13.8                # [模型/工具] 约束 JAX 相关依赖
+torch==2.7.1                   # [数据/PyTorch] LeRobot 数据读取依赖
+torchvision==0.22.1            # [数据/图像] 与 PyTorch 2.7.1 配套
+torchcodec==0.5                # [数据/视频] 与仓库依赖保持一致
+nvidia-cuda-nvcc-cu12==12.6.85  # [GPU/编译工具] JAX 所需的 CUDA 工具
+lerobot==0.4.4                 # [数据/格式] 官方 LeRobot reader
+datasets==4.8.5                # [数据/Parquet] LeRobot 的 Hugging Face 数据依赖
+av==15.1.0                     # [数据/视频] 默认 pyav 解码后端
+evdev==2.0.0                   # [数据/间接依赖] 使用 Conda 预编译包，避免头文件不匹配
+huggingface-hub==0.35.3         # [下载/兼容] 满足 LeRobot 的版本范围
+opencv-python==4.12.0.88        # [数据/图像] 兼容 NumPy 2
+opencv-python-headless==4.12.0.88 # [数据/图像] LeRobot 声明的无窗口版本
+packaging==25.0                # [安装/兼容] 满足 LeRobot 的版本范围
+setuptools==80.9.0             # [安装/构建] 满足 LeRobot 的版本范围
+wandb==0.24.2                  # [日志/兼容] 满足 LeRobot 的版本范围；是否上传由训练 YAML 决定

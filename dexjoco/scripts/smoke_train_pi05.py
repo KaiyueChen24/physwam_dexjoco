@@ -79,7 +79,7 @@ def run_smoke(config, resolved):
     finally:
         manager.close()
     result = {"passed": True, "group": resolved["group"]["name"],
-              "model": "full pi05 LoRA",
+              "model": "pi05", "finetune_mode": config.policy_metadata["finetune_mode"],
               "data_source": "lerobot", "steps_before_restore": config.num_train_steps,
               "step_after_restore": int(restored.step), "max_parameter_update": delta,
               "metrics": records, "continuation_metrics": continuation,

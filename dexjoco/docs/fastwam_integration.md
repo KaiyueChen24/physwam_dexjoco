@@ -11,7 +11,8 @@ FastWAM 官方模型、注意力、flow matching 损失、训练器保持原样�
 | 位置 | 职责 |
 |---|---|
 | `configs/task_groups/*.yaml` | 复用现有任务成员、指令、相机映射、训练 episode 选择 |
-| `configs/experiments/fastwam_baseline.yaml` | FastWAM 的 batch、步数、视频采样与推理参数 |
+| `configs/experiments/fastwam_single.yaml` | 四卡单臂单任务正式配方，默认 20,000 步 |
+| `configs/experiments/fastwam_smoke.yaml` | 四卡真实数据短跑，20 步，每 10 步保存/验证 |
 | `scripts/train_fastwam_group.py` | 解析任务组，检查数据，写运行快照，启动官方训练 |
 | `fastwam/configs/data/dexjoco_*.yaml` | 单／双臂维度与序列适配器配置 |
 | `fastwam/experiments/dexjoco/data.py` | 检查本地 LeRobot 元数据，计算所选训练帧的精确 min/max |
@@ -54,70 +55,88 @@ GPU/CUDA 驱动必须与官方安装要求匹配。默认 batch=1 是每个设�
 源码运行脚本会把新 package 加入 PYTHONPATH；需要控制台入口时重新执行
 `python -m pip install -e ./dexjoco`，之后可运行 `dexjoco-fastwam-eval --help`。
 
-## 先查看配置（无需数据、权重、GPU）
+## 四卡配方与启动优先级
 
-在 `~/physwam/dexjoco` 执行：
+两份配方均默认 `group: single_arm`、`tasks: [water_plant]`、`gpus: "0,1,2,3"`。
+每卡 batch=1、梯度累积=1，有效全局 batch=4。保持 BF16、梯度检查点、ZeRO-1，未启用 CPU offload。
+这是按每卡 80GB 的四张 H100 规划的起点，显存与吞吐仍需服务器实测。
+`--group`、`--tasks`、`--gpus` 可覆盖 YAML；`tasks: null` 才会选择整个任务组。
 
-```bash
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --dry-run
-python scripts/train_fastwam_group.py --group dual_arm \
-  --run-name fastwam_dual_baseline --dry-run
-```
+| 配方 | 更新步数 | 保存间隔 | 验证间隔 | 每任务验证批次上限 |
+|---|---:|---:|---:|---:|
+| fastwam_single.yaml（默认） | 20000 | 1000 | 1000 | 全量 |
+| fastwam_smoke.yaml | 20 | 10 | 10 | 2 个全局批次 |
 
-`--dry-run` 不创建 run、不下载模型、不启动训练。可用 `--fastwam-root` 指定非同级目录，
-`--dataset-root` 指定数据目录。相对数据路径按 DexJoCo 仓库根目录解析。
+smoke 使用同一个官方训练器与真实数据；没有 dummy 模型，也不是 π0.5 的 smoke 脚本。
+它不会自动检查参数差分或自动恢复后再多训一步。保存、验证的结果应结合日志检查，恢复需要显式命令。
+正式训练请使用新的 run-name，不在同一 run 内切换配方或修改预算。
 
-## 数据与最小训练
+## 数据与首次短跑
 
-先下载并解压 LeRobot 数据。可复用已有 `prepare_group_data.py --group single_arm --data-only`；
-该下载脚本的环境与解压说明沿用 `group_training.md`，不会下载 FastWAM 权重。
-数据适配支持官方本地 LeRobot v2/v3 视频布局，要求 action/state 是已转换好的 rotvec 动作与机器人状态，
-不接受特权环境状态或 π0.5 的 padding。所有任务的数据 fps 必须匹配 `control_hz`。
-默认 horizon=32、video_stride=4，训练视频为 9 帧；不是 33 个视频帧。
-未来查询由官方 reader 在 episode 内截断并生成 padding mask，绝对目标动作在末尾复制。
-
-第一阶段只选择 water_plant：
+以下命令均从 `~/physwam/dexjoco` 执行，在独立 fastwam 环境中运行：
 
 ```bash
 conda activate fastwam
 cd ~/physwam/dexjoco
 
-# 只读取元数据和低维 parquet，计算所选训练 episodes 的统计量
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --stage prepare
+FASTWAM_ARGS=(
+  --experiment configs/experiments/fastwam_smoke.yaml
+  --run-name fastwam_water_smoke
+)
 
-# 解码每个任务的首个序列，输出形状及首尾图像，检查相机和时间对应
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --stage inspect
+# 不读取数据、不创建 run、不下载权重；确认只有 water_plant、4 个进程、全局 batch 4
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --dry-run
 
-# 使用官方预处理脚本从 Wan 构造 ActionDiT backbone（可能下载大模型）
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --stage initialize --gpus 0
+# 下载/准备真实数据后：划分 episodes，检查元数据，计算仅含训练集的统计
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage prepare
 
-# 使用官方 Accelerate / DeepSpeed 训练器
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --stage train --gpus 0
+# 每任务解码一个真实序列，输出首尾画面和张量形状
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage inspect
+
+# 首次准备一次：只使用首个可见 GPU；文件已存在时跳过，不覆盖
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage initialize
+
+# 启动四个训练进程，训练 20 步
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage train
 ```
 
-同一个 run 的参数必须保持一致，因此上面四个命令都保留 `--steps 20`。
-初始化 backbone 由官方明确排除机器人动作输入／输出层，可以供两种动作维度共享。
-已存在的初始化不会被覆盖。resume 必须明确指定同一 run 的完整 state 目录：
+需要使用另外四张卡时，在每个命令追加 `--gpus 4,5,6,7`。同一 run 参数保持一致。
+训练日志为 `runs/fastwam_water_smoke/train.log`；检查 loss 有限、验证记录及第 10/20 步权重和状态目录。
+初始化会按需下载 Wan 组件；初始化骨干不是训练后的策略 checkpoint。
+
+数据预期位于 `datasets/dexjoco_lerobot_datasets/water_plant/`，或使用 `--dataset-root` 覆盖父目录。
+可复用 `prepare_group_data.py --group single_arm --data-only` 下载，但该命令选择整个单臂组，不只 water_plant。
+适配器支持官方本地 LeRobot v2/v3 视频布局；单臂 action/state 必须为 22/23 维，且不含特权状态或 π0.5 padding。
+视频与动作 fps 必须匹配 control_hz。horizon=32、video_stride=4 对应 9 个视频帧。
+
+检查恢复时，显式恢复该 run 已保存的第 10 步完整状态，继续到原目标第 20 步：
 
 ```bash
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --stage train --gpus 0 \
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage train \
   --resume runs/fastwam_water_smoke/checkpoints/state/step_000010
 ```
 
-这是恢复示例，目录必须实际存在；它会继续原先的训练步数目标。
-初始化权重不是策略 checkpoint，完整部署必须使用训练生成的 mot + proprio_encoder 权重。
-官方生成式视频评测仍关闭（eval_every=0）；独立留出集通过 validation_loss 路径只计算原始训练目标的 loss。
-闭环成功率仍通过独立 seeds／任务环境评测，不能把验证 loss 当作成功率。
+目录必须实际存在。smoke checkpoint 只用于检查加载和闭环，不作为正式性能结果。
+训练完成后，从下文的服务和评测入口进行闭环检查。
+
+## 单任务正式训练
+
+```bash
+# 默认 fastwam_single.yaml：water_plant，4 卡，20000 步
+python scripts/train_fastwam_group.py --run-name fastwam_water_single --stage prepare
+python scripts/train_fastwam_group.py --run-name fastwam_water_single --stage train
+
+# 改为其他单臂任务（prepare/inspect/train 都保持相同参数）
+python scripts/train_fastwam_group.py --tasks hammer_nail \
+  --run-name fastwam_hammer_single --stage prepare
+```
+
+官方生成式视频评测保持关闭（eval_every=0）；独立留出集只计算 training_loss。
+验证 loss 不等于闭环成功率。
 
 ## 留出验证集（仅计算 loss）
 
-`fastwam_baseline.yaml` 默认开启验证：
+`fastwam_single.yaml` 默认开启验证：
 
 ```yaml
 # 【验证 / validation】
@@ -143,31 +162,19 @@ validation_max_batches: null   # [验证/预算] null 遍历全量；整数限�
 默认遍历完整验证集；设置批次上限时按任务固定抽帧，并记录是否全量。验证比例是 episode 比例，不是精确帧比例。
 恢复必须沿用原划分和统计；已有无验证的训练不能改配置后继续作为独立验证，应新建 run。
 
-## 多任务训练
+## 扩展到多任务
+
+两份配方默认是单任务。如需组内联合训练，可在自己的实验 YAML 中将 `tasks` 改为 null，
+或者使用 `--tasks` 显式列出成员。例如双臂任务子集：
 
 ```bash
-# 单臂六任务共享一个策略
-python scripts/train_fastwam_group.py --group single_arm \
-  --run-name fastwam_single_baseline --stage prepare
-python scripts/train_fastwam_group.py --group single_arm \
-  --run-name fastwam_single_baseline --stage train --gpus 0,1
-
-# 双臂五任务共享另一个策略
 python scripts/train_fastwam_group.py --group dual_arm \
-  --run-name fastwam_dual_baseline --stage prepare
-python scripts/train_fastwam_group.py --group dual_arm \
-  --run-name fastwam_dual_baseline --stage train --gpus 0,1
-
-# 需要逐任务独立模型时显式选择
-python scripts/train_fastwam_group.py --group single_arm --mode per_task \
-  --run-name fastwam_independent --stage prepare
+  --tasks bimanual_assembly bimanual_hanoi \
+  --run-name fastwam_dual_subset --stage prepare
 ```
 
-任务均衡通过等长的虚拟任务分区实现：每个任务重复较短数据、循环覆盖自身训练帧，
-再交给官方 ResumableEpochSampler 打乱与分布式分发。一个完整虚拟 epoch 各任务样本数相同，
-任意短前缀不保证严格均衡。`frame_uniform` 则按所有任务帧连接，不重复小任务。
-统计量使用全部所选训练帧的精确 min/max，因此不存在不同采样权重下均值估计的歧义。
-`episodes` 有选择时 reader 与统计量均遵守选择；请让同一原始示范的随机化版本留在同一划分。
+正式训练的所有阶段重复相同任务与实验参数。`--mode per_task` 会为所选任务分别创建 run。
+任务均衡通过等长虚拟任务分区和官方 sampler 实现；frame_uniform 按所有实际帧采样。
 
 ## 服务与闭环评测
 

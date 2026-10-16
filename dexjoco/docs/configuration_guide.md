@@ -21,9 +21,10 @@
 
 主要配置已逐字段标注：
 
-- `configs/experiments/h100_lora.yaml`：π0.5 正式训练。
-- `configs/experiments/pi05_smoke.yaml`：单张 H100 80GB、真实数据的 π0.5 短跑。
-- `configs/experiments/fastwam_baseline.yaml`：FastWAM 训练与推理起始配方。
+- `configs/experiments/pi05_full.yaml`：默认四卡 FSDP，单臂六任务联合全量微调 π0.5。
+- `configs/experiments/pi05_smoke.yaml`：相同全量更新范围与四卡 FSDP，真实数据 20 步短跑。
+- `configs/experiments/fastwam_single.yaml`：4 张 H100，默认 water_plant 单任务，20,000 步正式起始配方。
+- `configs/experiments/fastwam_smoke.yaml`：相同模型与数据契约，20 步真实数据短跑，每 10 步保存/验证。
 - `configs/task_groups/{single_arm,dual_arm}.yaml`：两组共享的任务与数据契约。
 - `configs/{rand_obj,rand_full,multi_task,ipad_reasoning}/*.yaml`：仿真环境与语言指令。
 - `openpi/config.yaml`：原始 OpenPI/DexJoCo 配置入口，不替代分组实验 YAML。
@@ -31,10 +32,92 @@
 - 同级 `fastwam/configs/{train.yaml,model/fastwam.yaml}`：FastWAM 上游默认训练/模型设置。
 - 同级 `fastwam/scripts/accelerate_configs/accelerate_zero1_ds.yaml`：当前 FastWAM 启动器使用的 GPU/DeepSpeed 设置。
 
+## 环境安装参数
+
+从工作区根目录运行 `bash dexjoco/scripts/setup_pi05_env.sh`。
+固定版本文件为 `configs/environments/pi05_constraints.txt`，每行已标注中文类别。
+这是关键依赖约束；Conda 及其他传递依赖仍由包管理器解析，不是跨平台的完整锁文件。
+安装完成时会生成完整 Python 包版本记录 `setup-pi05.*.versions.json`。
+
+| 参数 | 类别 | 默认值与用途 |
+|---|---|---|
+| `--name` | 环境/名称 | 默认 pi05；创建或复用 Python 3.11 环境，拒绝 base |
+| `--prefix` | 环境/路径 | 可选完整路径；与显式 --name 互斥，可将环境放在个人 AIFS 目录 |
+| `--proxy` | 网络/已有代理 | 默认继承终端设置；显式 HTTP/HTTPS 代理用于安装，并写入本机环境文件供后续 source；与 --setup-proxy 互斥 |
+| `--setup-proxy` | 网络/Mihomo 安装与启动 | 默认关闭；先准备 Mihomo 并验证 HTTPS 出口，再安装 Conda/依赖 |
+| `--proxy-port` | 网络/监听端口 | 默认 17890，范围 1024–65535；仅与 --setup-proxy 配合；绑定 127.0.0.1 |
+| `--mihomo-binary` | 网络/离线准备 | 可选已上传的 Linux amd64 二进制或 .gz；需 --setup-proxy，解决代理尚未启动时无法访问 GitHub 的问题 |
+| `--subscription-file` | 网络/订阅来源 | 可选已下载的 Clash/Mihomo 订阅文件；需 --setup-proxy；缺省时复用已保存订阅，否则隐藏输入链接并下载 |
+| `--cache-dir` | 缓存/AIFS、日志 | 默认 `$XDG_CACHE_HOME/physwam` 或 `~/.cache/physwam`；包含下表中的缓存与安装记录，换机时传入新路径 |
+| `--check-gpu` | GPU/验证 | 默认关闭；传入单个 GPU 编号，仅对该卡做 JAX 运算检查 |
+| `--dry-run` | 安装/计划 | 不下载、不安装、不提示输入订阅、不创建文件，只显示计划 |
+
+默认检查在 CPU 上执行，安装阶段不需要空闲 GPU。安装器不修改 `.bashrc`；完成后按输出激活环境。
+`evdev` 在 pip 前通过 Conda 安装二进制包，避免混用 Linux 头文件引起 `KEY_LINK_PHONE` 编译错误。
+
+### 每台服务器的缓存与代理
+
+参数不写入训练 YAML。安装成功时生成 `~/.config/physwam/pi05-env.sh`，文件权限为 600。
+每次激活环境后 `source "$HOME/.config/physwam/pi05-env.sh"`，下载和训练进程即可继承该机设置。
+不指定 --proxy/--setup-proxy 时仅继承当前 shell 代理，不将其保存到环境文件。
+重新运行安装器会替换此环境文件；已下载的缓存文件保留。
+
+| 环境变量/目录 | 类别 | `--cache-dir PATH` 下的位置 |
+|---|---|---|
+| `PIP_CACHE_DIR` | 安装/下载缓存 | `PATH/pip` |
+| `CONDA_PKGS_DIRS` | 安装/Conda 包缓存 | `PATH/conda` |
+| `HF_HOME` | 数据与权重/Hugging Face 根缓存 | `PATH/huggingface` |
+| `HF_HUB_CACHE` | 数据与权重/Hub 文件缓存 | `PATH/huggingface/hub` |
+| `HF_DATASETS_CACHE` | 数据/HF datasets 缓存 | `PATH/huggingface/datasets` |
+| `OPENPI_DATA_HOME` | 权重/OpenPI 下载缓存 | `PATH/openpi` |
+| 安装日志、包版本 JSON | 日志/安装记录 | `PATH/logs` |
+
+安装器不会挂载 AIFS、调整配额、搬迁已有缓存或改变项目数据路径。
+先用 `findmnt -T /aifs/你的目录` 检查挂载，用 `test -w /aifs/你的目录` 检查写入权限。
+`prepare_group_data.py` 使用显式 local_dir，数据与初始权重仍下载到 `dexjoco/datasets/`、
+`dexjoco/checkpoints/`；需要放在 AIFS 时可将仓库本身克隆在 AIFS 的个人目录。
+
+### Mihomo 准备与管理
+
+`--setup-proxy` 需要系统 Python >=3.9、curl。优先复用本脚本保存的 Mihomo，
+其次复制 PATH 或 `~/.local/bin/mihomo` 中的程序，均不存在时下载官方固定版本
+[v1.19.31 Linux amd64 compatible](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.31)，并校验官方 SHA256。
+网络受限时从官方 release 下载 .gz 并上传服务器，使用 `--mihomo-binary`；
+订阅服务器无法直连时也可上传已下载的订阅，并用 `--subscription-file` 指定。
+仅有订阅链接不能解决 Mihomo 二进制本身无法下载的问题。
+
+配置、节点文件、进程记录及私有日志位于 `~/.config/physwam/mihomo/`，不覆盖旧的
+`~/.config/mihomo/config.yaml`。订阅通过官方支持的
+[本地 file provider](https://wiki.metacubex.one/config/proxy-providers/) 读取节点，
+生成的配置仅监听 127.0.0.1、关闭 LAN 访问，不启用 TUN 或控制 API；AUTO 组自动测速选择节点。
+订阅链接隐藏输入且不作为命令行参数传递，勿将订阅或代理私有日志提交到 Git。
+本机端口被占用时脚本报错，不停止其他进程；已有可用代理请使用 `--proxy`。
+
+Mihomo 以后台进程运行，可在关闭 SSH 后继续使用；服务器重启后需重新启动（未安装系统服务）。
+从工作区根目录执行以下独立命令即可，无需重装 Python 环境：
+
+```bash
+# 网络/启动：端口应与 pi05-env.sh 中的地址一致。
+python3 dexjoco/scripts/setup_mihomo.py --port 17890
+source "$HOME/.config/physwam/pi05-env.sh"
+# 网络/停止：只停止进程身份与本脚本记录匹配的 Mihomo。
+python3 dexjoco/scripts/setup_mihomo.py --stop
+```
+
+已有受管代理运行时改变端口、二进制或订阅会报错。先执行 --stop，等待端口释放，
+再重新运行安装器并传入新参数；不要手动覆盖正在使用的订阅或二进制。
+在同一台服务器上重跑且不传新二进制/订阅时会复用现有进程，仍验证 GitHub HTTPS 连通性。
+
 ## 读取优先级与运行快照
 
 π0.5：支持的命令行覆盖项优先于实验 YAML；`dataset_root: null` 回退到任务组路径。实验 YAML 中的 `sampling` 会覆盖组内默认值。
+两份 π0.5 配方的 `group`、`gpus` 默认 `single_arm`、字符串 "0,1,2,3"，可由 --group、--gpus 覆盖。
+任务组中的全部任务联合训练；`finetune_mode: full` 全量更新，`lora` 使用原 LoRA 结构。
 FastWAM：支持的命令行覆盖项优先于实验 YAML，实验配置再覆盖上游训练和模型模板；采样方式读取实验 YAML。
+`group`、`tasks`、`gpus` 也由启动器读取；两份配方默认 single_arm、[water_plant]、字符串 "0,1,2,3"。
+`tasks: null` 表示使用整个任务组；命令行 --group、--tasks、--gpus 分别覆盖。
+四卡配方每卡 batch=1、梯度累积=1，因此有效全局 batch=4。dry-run 的 framework.launch 显示实际卡数与 batch。
+初始化骨干脚本只在首个可见 GPU 上运行；四个训练进程由 train 阶段的 Accelerate 启动。
 FastWAM 适配器还会显式设置部分字段，例如 `eval_every=0`（生成式视频评测关闭；留出 loss 验证使用独立路径）。这些固定设置在构造器中标有中文类别。
 
 训练 run 中保存的配置是该次实验采用的值。服务/评测以 run 快照为准，修改源 YAML 不会自动改变已有 run。
@@ -61,9 +144,9 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 
 | 入口 | 关键参数与用途 |
 |---|---|
-| `scripts/train_group.py` | `--group`、`--experiment`、`--run-name`、`--gpus`；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
-| `scripts/smoke_train_pi05.py` | 默认读取 H100 真实数据 pi05_smoke；脚本自身测试恢复，不接受 --resume |
-| `scripts/train_fastwam_group.py` | `--stage prepare/inspect/initialize/train`；`--tasks` 可选子集；`--mode joint/per_task`；`--resume` 必须指向完整训练状态目录 |
+| `scripts/train_group.py` | 默认 pi05_full.yaml；任务组与 GPU 默认读取配方；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
+| `scripts/smoke_train_pi05.py` | 默认四卡全量微调真实数据 pi05_smoke；脚本自身测试恢复，不接受 --resume |
+| `scripts/train_fastwam_group.py` | 默认 fastwam_single.yaml；--experiment 可选 fastwam_smoke.yaml；任务与 GPU 默认读配方；`--stage prepare/inspect/initialize/train`；`--mode joint/per_task`；`--resume` 必须指向完整训练状态目录 |
 | `scripts/prepare_group_data.py` | `--group`、`--data-only`、`--weights-only`、`--data-revision`、`--model-revision`；权重下载针对 π0.5 |
 
 ## 部署与闭环评测参数
@@ -108,9 +191,12 @@ FastWAM 实验 YAML 中三个运行参数的区别：
 
 ## Python 与上游模板中的默认值
 
-π0.5 的 `scripts/group_common.py::build_train_config` 固定使用语言侧 `gemma_2b_lora`（rank=16、alpha=16）和动作侧 `gemma_300m_lora`（rank=32、alpha=32）。
+π0.5 的 `scripts/group_common.py::build_train_config` 读取 `finetune_mode`。
+`full` 使用标准 `gemma_2b` 和 `gemma_300m`，不插入 LoRA，冻结过滤器为 `nnx.Nothing`，视觉、语言、动作参数全部更新。
+`lora` 使用 `gemma_2b_lora`（rank=16、alpha=16）和 `gemma_300m_lora`（rank=32、alpha=32），按模型规则冻结基础语言/动作专家权重，视觉编码器仍可训练。
+旧配置或 run 快照缺少该字段时仍解释为 `lora`，避免恢复和推理时改变历史模型结构；新配方均显式设置 `full`。
 AdamW 默认 β1=0.9、β2=0.95、eps=1e-8、weight_decay=1e-10，梯度裁剪为 1；EMA 关闭。
-冻结策略沿用模型过滤器，视觉编码器仍可训练，不是只更新 LoRA。默认模型计算类型为 bfloat16，不意味着优化器状态均为 BF16。
+默认模型计算类型为 bfloat16，不意味着优化器状态均为 BF16。正式配方全局 batch 32、FSDP 4，实际峰值显存应先通过 smoke 确认。
 
 FastWAM 的 `experiments/dexjoco/config.py::build_config` 从官方 `configs/train.yaml` 与 `configs/model/fastwam.yaml` 继承基础设置，再覆盖任务维度与实验参数。
 当前官方训练器使用 AdamW（β1=0.9、β2=0.95）、总步数 5% 的学习率预热及模板指定的调度类型；梯度裁剪读取 `max_grad_norm`，默认 1。

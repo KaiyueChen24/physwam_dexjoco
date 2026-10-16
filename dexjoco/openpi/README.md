@@ -10,17 +10,28 @@ regimes:
 
 ## Environment
 
-Create the Conda environment and install the local packages:
+From this directory, install the training/serving environment with:
 
 ```bash
-cd openpi
-bash install.bash
-conda activate openpi
+bash ../scripts/setup_pi05_env.sh --name openpi
 ```
 
-The installation uses Conda to support non-sudo installation of `git-lfs` and
-`ffmpeg`. The `lerobot` package is installed with `--no-deps` because this setup
-only requires the LeRobot dataset interface.
+The installer detects Conda (or installs Miniforge under your home), installs
+Python 3.11, FFmpeg 7 and a prebuilt `evdev`, then installs the local OpenPI/client
+and LeRobot with the version constraints in
+[`pi05_constraints.txt`](../configs/environments/pi05_constraints.txt).
+Follow the activation commands printed at the end. The default checks use CPU;
+add `--check-gpu 0` when an allocated GPU is available. For an existing HTTP
+proxy, add `--proxy http://127.0.0.1:17890`. To prepare Mihomo on a new server,
+add `--setup-proxy --proxy-port 17890`; an uploaded binary can be supplied with
+`--mihomo-binary /path/to/mihomo.gz`. Use `--cache-dir /aifs/your-space/cache`
+for installation and HF/OpenPI caches. After activation, source
+`~/.config/physwam/pi05-env.sh`. See the [Chinese configuration guide](../docs/configuration_guide.md#环境安装参数).
+
+This setup targets Linux x86_64 and the CUDA 12 JAX backend. The server must
+provide its NVIDIA driver. Model weights, datasets and simulation packages are
+prepared separately. The older `install.bash` remains a legacy entry point;
+use the installer above for the pinned multitask environment.
 
 ## Checkpoints and Datasets
 

@@ -204,7 +204,7 @@ def test_fastwam_prepare_wires_heldout_data_and_train_only_stats(tmp_path):
     from train_fastwam_group import prepare
     from group_common import load_group
     task = make_dataset(tmp_path / "datasets/water_plant")
-    exp = yaml.safe_load((ROOT / "configs/experiments/fastwam_baseline.yaml").read_text())
+    exp = yaml.safe_load((ROOT / "configs/experiments/fastwam_single.yaml").read_text())
     def configuration():
         cfg = build_config(ROOT, "single_arm", exp, "validation_test", task_names=["water_plant"],
                            dataset_root=tmp_path / "datasets")

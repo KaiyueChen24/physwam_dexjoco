@@ -15,14 +15,53 @@ physwam/
 - [DexJoCo 原项目说明](dexjoco/README.md)
 - [FastWAM 原项目说明](fastwam/README.md)
 
+## 一键配置 π0.5 环境
+
+克隆后从工作区根目录执行：
+
+```bash
+bash dexjoco/scripts/setup_pi05_env.sh
+```
+
+默认建立或复用 Python 3.11 的 `pi05` 环境，未找到 Conda 时安装 Miniforge。
+脚本使用固定的关键依赖版本，先安装 Conda 预编译 `evdev`，再安装 OpenPI 与 LeRobot，
+最后执行 `pip check`、模块导入、序列化和 JAX CPU 运算检查。
+安装完成后，按终端输出的 `source ...` 和 `conda activate ...` 命令加载环境。
+
+新服务器需要 Mihomo 和 AIFS 缓存时（路径换成本机已挂载、可写的个人目录）：
+
+```bash
+bash dexjoco/scripts/setup_pi05_env.sh --name pi05 \
+  --setup-proxy --proxy-port 17890 \
+  --cache-dir /aifs/chenkaiyue/.cache/physwam
+```
+
+首次运行会隐藏输入订阅链接；可用 `--subscription-file /路径/订阅.yaml` 代替。
+GitHub 无法直连时，先上传官方 Mihomo `.gz`，再追加 `--mihomo-binary "$HOME/mihomo.gz"`。
+已有代理时，将 `--setup-proxy --proxy-port 17890` 换成 `--proxy http://127.0.0.1:17890`。
+代理后台运行，仅监听本机；订阅保存在 `~/.config/physwam/mihomo/`，不写进仓库。
+安装后及每次新开终端，激活环境并加载本机代理和缓存：
+
+```bash
+conda activate pi05  # 首次先执行安装器打印的 Conda source 命令
+source "$HOME/.config/physwam/pi05-env.sh"
+```
+
+`--cache-dir` 包括 pip、Conda、Hugging Face、OpenPI 缓存和日志；
+下载脚本仍写入 `dexjoco/datasets/`、`dexjoco/checkpoints/`，不会因缓存参数自动搬迁。
+详细参数、代理重启/停止见 [中文配置索引](dexjoco/docs/configuration_guide.md#环境安装参数)。
+默认检查只用 CPU；获得空闲 GPU 后可加 `--check-gpu 0`。
+环境安装覆盖 π0.5 训练与策略服务；数据、权重、NVIDIA 驱动和仿真环境分别准备。
+
 ## 使用
 
 现有命令仍从各组件目录运行，两个 Python 环境独立安装：
 
 ```bash
 cd dexjoco
-python scripts/train_fastwam_group.py --group single_arm --tasks water_plant \
-  --run-name fastwam_water_smoke --steps 20 --dry-run
+python scripts/train_fastwam_group.py \
+  --experiment configs/experiments/fastwam_smoke.yaml \
+  --run-name fastwam_water_smoke --dry-run
 ```
 
 在工作区根目录统一执行 `git status`、`git add`、`git commit` 与 `git push`。

@@ -12,7 +12,7 @@ import yaml
 
 from dataset_split import save_split, split_group, validation_settings
 
-from fastwam_common import ROOT, add_fastwam
+from fastwam_common import ROOT, add_fastwam, resolve_launch_options
 
 
 def prepare(config, dexjoco_root, fastwam_root):
@@ -71,22 +71,20 @@ def prepare(config, dexjoco_root, fastwam_root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--group", required=True, choices=("single_arm", "dual_arm"), help='[任务选择] 选择单臂或双臂任务组。')
+    parser.add_argument("--group", choices=("single_arm", "dual_arm"), help='[任务选择] 覆盖实验 YAML 的 group，选择单臂或双臂任务组。')
     parser.add_argument("--run-name", required=True, help='[配置与实验] 实验目录名，结果写入 runs/<名称>/。')
     parser.add_argument("--fastwam-root", help='[配置与实验] FastWAM 源码目录；默认使用 DexJoCo 的同级 fastwam/。')
     parser.add_argument("--dataset-root", help='[数据与 CPU] 覆盖任务数据根目录；相对路径以 DexJoCo 仓库根目录为准。')
-    parser.add_argument("--experiment", default="configs/experiments/fastwam_baseline.yaml", help='[配置与实验] 实验 YAML 路径；相对路径以 DexJoCo 仓库根目录为准。')
-    parser.add_argument("--tasks", nargs="+", help='[任务选择] 仅选择列出的任务；默认使用所选任务组或快照中的全部任务。')
+    parser.add_argument("--experiment", default="configs/experiments/fastwam_single.yaml", help='[配置与实验] 实验 YAML 路径；默认四卡单臂单任务正式配方，相对路径以 DexJoCo 仓库根目录为准。')
+    parser.add_argument("--tasks", nargs="+", help='[任务选择] 覆盖实验 YAML 的 tasks；YAML 中 tasks 为 null 时使用全部任务。')
     parser.add_argument("--mode", choices=("joint", "per_task"), default="joint", help='[训练] joint 为组内共享一个策略；per_task 为逐任务分别训练。')
     parser.add_argument("--stage", choices=("prepare", "inspect", "initialize", "train"), default="prepare", help='[训练] prepare 检查与统计；inspect 检查序列；initialize 构造动作骨干；train 启动官方训练器。')
-    parser.add_argument("--gpus", default="0", help='[GPU 与并行] 可见 GPU 编号，逗号分隔，例如 0,1；不是 GPU 数量。')
+    parser.add_argument("--gpus", help='[GPU 与并行] 覆盖实验 YAML 的 gpus，例如 4,5,6,7；默认从配方读取。')
     parser.add_argument("--batch-size", type=int, help='[训练] 覆盖 YAML 的每张 GPU batch；有效全局 batch 还需乘卡数和梯度累积。')
     parser.add_argument("--steps", type=int, help='[训练] 覆盖 YAML 的优化器更新总步数，不是 epoch。')
     parser.add_argument("--resume", help='[权重与结果保存] 显式指定本次实验 checkpoints/state/step_XXXXXX 完整状态目录；仅支持 joint 的 train 阶段。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
-    if not args.gpus or any(not part.isdigit() for part in args.gpus.split(",")) or len(set(args.gpus.split(","))) != len(args.gpus.split(",")):
-        parser.error("--gpus must be unique comma-separated numeric device IDs")
     if args.resume and (args.stage != "train" or args.mode != "joint"):
         parser.error("--resume requires --stage train --mode joint")
     fastwam_root = add_fastwam(args.fastwam_root)
@@ -95,6 +93,12 @@ def main():
     experiment = read_yaml(experiment_path if experiment_path.is_absolute() else ROOT / experiment_path)
     if experiment.get("model") != "fastwam" or experiment.get("schema_version") != 1:
         raise ValueError("Expected a FastWAM experiment")
+    try:
+        args.group, args.tasks, args.gpus = resolve_launch_options(args.group, args.tasks, args.gpus, experiment)
+    except ValueError as error:
+        parser.error(str(error))
+    # Record actual CLI/YAML selections in the run snapshot.
+    experiment.update(group=args.group, tasks=args.tasks, gpus=args.gpus)
     validation_settings(experiment)
     for arg, key in ((args.batch_size, "batch_size"), (args.steps, "max_steps")):
         if arg is not None:
@@ -110,6 +114,10 @@ def main():
     for selected in selections:
         name = args.run_name + ("_" + selected[0] if args.mode == "per_task" else "")
         config = build_config(ROOT, args.group, experiment, name, task_names=selected, dataset_root=args.dataset_root)
+        config["framework"]["launch"] = {
+            "gpus": args.gpus, "num_processes": len(args.gpus.split(",")),
+            "effective_global_batch_size": config["batch_size"] * len(args.gpus.split(",")) * config["gradient_accumulation_steps"],
+        }
         if args.dry_run:
             print(yaml.safe_dump(config, sort_keys=False))
             continue

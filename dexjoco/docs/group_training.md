@@ -2,8 +2,42 @@
 
 参数类别、GPU 设置、部署与 eval 选项见 [中文配置索引](configuration_guide.md)。
 
-所有下面的命令从仓库根目录执行。脚本内部处理 OpenPI 的工作目录要求。
+除环境安装命令外，下面的命令从 `dexjoco/` 目录执行。脚本内部处理 OpenPI 的工作目录要求。
 单臂六任务共享一个 policy，双臂五任务共享另一个 policy；第一版采用 rand_obj。
+
+## 一键安装训练环境
+
+以下命令从 PhysWAM 工作区根目录（含 dexjoco/ 和 fastwam/）执行：
+
+```bash
+bash dexjoco/scripts/setup_pi05_env.sh --name pi05
+# 新服务器需要安装/启动 Mihomo、指定本机 AIFS 缓存时：
+bash dexjoco/scripts/setup_pi05_env.sh --name pi05 --setup-proxy \
+  --proxy-port 17890 --cache-dir /aifs/chenkaiyue/.cache/physwam
+# 已有代理则用 --proxy http://127.0.0.1:17890 替代 --setup-proxy --proxy-port 17890
+```
+
+两条示例选择一条即可。安装器检测现有 Conda，缺失时安装 Miniforge；安装 Python 3.11、
+FFmpeg 7、Conda 预编译 evdev，以及受 `configs/environments/pi05_constraints.txt` 约束的依赖。
+可重复执行以补齐依赖或重建 editable 源码关联；已有环境若不是 Python 3.11，会报错并要求另选环境名。
+默认只做 CPU 检查，包括 LeRobot/OpenPI 导入、NumPy 序列化和 JAX 运算；不要求空闲 GPU。
+有已分配的空闲卡时，可追加 `--check-gpu 0` 检查该卡。
+
+安装完成后复制脚本打印的 Conda 初始化、激活命令，再加载本机设置：
+
+```bash
+conda activate pi05
+source "$HOME/.config/physwam/pi05-env.sh"
+cd dexjoco
+```
+
+`--cache-dir /aifs/chenkaiyue/.cache/physwam` 同时指定包缓存、HF/OpenPI 缓存与安装日志；
+更换服务器时重新传入该机可写路径。它不移动 `datasets/`、`checkpoints/` 或训练输出。
+`--setup-proxy` 首次隐藏输入订阅链接，也可传 `--subscription-file`；
+无法直连 GitHub 时先上传 Mihomo，并追加 `--mihomo-binary "$HOME/mihomo.gz"`。
+代理凭据和环境设置保存在用户目录，后台代理仅监听回环地址，无需 sudo。
+代理进程重启、更新及全部参数见 [环境安装参数](configuration_guide.md#环境安装参数)。
+服务器仍需 NVIDIA 驱动及已挂载的存储；数据、权重、FastWAM 和仿真环境另行配置。
 
 ## 配置与数据契约
 
@@ -12,10 +46,12 @@
 - 每个任务配置语言指令、原始相机映射和可选 `episodes`（用于划分的候选 episode ID 列表）。
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
-- `pi05_smoke.yaml`：单张 H100 80GB、真实数据与 base 权重、全局 batch 1、20 步短跑。
-- `h100_lora.yaml`：真实数据、LoRA、全局 batch 32、60,000 步起点。
+- `pi05_smoke.yaml`：四卡 FSDP、真实数据与 base 权重、全量微调、全局 batch 4、20 步短跑。
+- `pi05_full.yaml`：默认单臂全部六任务联合训练，四卡 FSDP、全量微调、全局 batch 32、60,000 步起点。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
-- 全局 batch 需整除可见 GPU 数量。`fsdp_devices=1` 为单机数据并行；更大的合法值开启参数分片。
+- 两份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
+- `--group`、`--gpus` 覆盖 YAML；省略时默认 `single_arm`、`0,1,2,3`。组内六个任务各以 1/6 概率采样，共享一个模型。
+- 全局 batch 必须能被可见 GPU 数整除；`fsdp_devices` 必须整除可见 GPU 数。默认 4 表示一个四卡分片组；1 表示不分片的数据并行。
 - 当前任务均衡采样支持单进程 JAX 的单机多卡，不支持多节点或 PyTorch DDP。
 - 各任务先通过自己的 LeRobot reader 构造动作 chunk，再统一相机字段；chunk 不跨 episode。
 - `task_balanced` 使每个任务获得相同采样概率；`frame_uniform` 按所有帧均匀采样。
@@ -24,7 +60,7 @@
 
 ## 留出验证集（仅计算 loss）
 
-`h100_lora.yaml` 和 `pi05_smoke.yaml` 已接入以下参数：
+`pi05_full.yaml` 和 `pi05_smoke.yaml` 已接入以下参数：
 
 ```yaml
 # 【验证 / validation：只计算 loss，不反向传播】
@@ -35,7 +71,7 @@ validation_batch_size: 8       # [验证/GPU] π0.5 所有 GPU 合计的 batch�
 validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；整数限制每任务的验证批次数
 ```
 
-H100 短跑使用验证间隔 10、验证 batch 1，每任务最多 2 批；正式 h100_lora 配方遍历完整验证集。
+全量短跑使用验证间隔 10、全局验证 batch 4，每任务最多 2 批；正式 pi05_full 配方遍历完整验证集。
 真实数据按每任务的 episode 数向上取整，至少留一条验证和一条训练示范；不足两条时报错。
 例如每任务 100 条 episode，默认 90 条训练、10 条验证；episode 长短不一时帧数比例不保证恰为 9:1。
 同一任务在两个模型中采用相同的候选 episode、比例和种子时，得到相同划分。
@@ -59,89 +95,85 @@ H100 短跑使用验证间隔 10、验证 batch 1，每任务最多 2 批；正�
 验证不调用梯度或优化器更新，不消耗训练使用的噪声随机流，不运行模拟器。
 本功能仅记录 loss，不自动早停或选择最佳 checkpoint；动作成功率仍由独立闭环评测衡量。
 
-## 单卡 H100 smoke test
+## 四卡全量微调 smoke test
 
-`pi05_smoke.yaml` 现为单卡 H100 80GB 的真实数据短跑配置。单臂六任务共享一个完整 π0.5 LoRA 模型，双臂五任务另跑一个模型。
+`pi05_smoke.yaml` 使用与正式训练一致的全量更新范围和四卡 FSDP，缩小 batch 和步数以检查链路。
+默认单臂六任务共享一个 π0.5 模型；实际峰值显存与编译耗时需要在服务器短跑确认。
 先准备所选任务组的全部数据和 base 权重；每个任务至少有两条候选 episode，才能划分训练和验证。
 
 ```bash
-conda activate openpi
+conda activate pi05
 cd ~/physwam/dexjoco
 
 # 查看配置；不访问数据、不加载模型、不创建 run
-python scripts/smoke_train_pi05.py --group single_arm --dry-run
+python scripts/smoke_train_pi05.py --dry-run
 
 # 需要时下载单臂数据和 base 权重，并按数据说明完成解压
 python scripts/prepare_group_data.py --group single_arm
 
-# 单张 H100：真实单臂六任务、20 次更新、两次验证，随后保存/恢复并再更新一步
-python scripts/smoke_train_pi05.py --group single_arm \
-  --run-name h100_single_smoke --gpus 0
+# 四张 H100：真实单臂六任务、20 次更新、两次验证，随后保存/恢复并再更新一步
+python scripts/smoke_train_pi05.py --run-name pi05_single_full_smoke
 ```
 
 用 `--dataset-root /服务器/数据父目录` 指定外部数据盘；初始化目录可用 `--checkpoint /路径/params` 覆盖。
-单臂通过后，准备双臂五任务和 44 维 base 权重，在同一卡上依次检查：
+若后续需要双臂，另行准备五任务和 44 维 base 权重，用独立 run 检查：
 
 ```bash
 python scripts/prepare_group_data.py --group dual_arm
 python scripts/smoke_train_pi05.py --group dual_arm \
-  --run-name h100_dual_smoke --gpus 0
+  --run-name pi05_dual_full_smoke --gpus 0,1,2,3
 ```
 
 脚本检查各任务数据和图像、训练指标有限、参数更新、留出集 loss、保存、恢复状态完全一致以及恢复后继续一步。
 结果位于 `runs/<name>/smoke_result.json`、`validation_loss.jsonl` 和 `train.log`。
 专用 smoke 在第 20、21 步保存；`save_interval: 10` 仅在通过 train_group.py 使用该配置时生效。
-`validation_max_batches: 2` 只检查每任务最多两帧，结果注明是否全量；512 帧的归一化估计也仅供短跑。
-正式训练请用独立 run-name 和 h100_lora.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
+`validation_max_batches: 2` 只检查每任务最多两批（当前全局 batch 4，即最多 8 帧），结果注明是否全量；512 帧的归一化估计也仅供短跑。
+正式训练请用独立 run-name 和 pi05_full.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
 
 ## 服务器准备与训练
 
-服务器复制同一份代码，按仓库原有方法建立 openpi 和 dexjoco 两个环境。
+服务器复制同一份代码，用上面的一键脚本建立 pi05 训练环境，并另行建立 dexjoco 仿真环境。
 命令中的工作目录按服务器实际位置调整；相对数据路径会自动依据仓库位置解析。
-保留 `openpi-client` 的 NumPy 兼容修补；不要把仿真环境的 NumPy 1.26.4 安装进 openpi。
+保留 `openpi-client` 的 NumPy 兼容修补；不要把仿真环境的 NumPy 1.26.4 安装进 pi05。
 
 ```bash
-conda activate openpi
+conda activate pi05
 cd ~/physwam/dexjoco
 
-# 下载 rand_obj 的 11 个任务和两种 base 权重，记录实际 Hugging Face revision
-python scripts/prepare_group_data.py --group all
+# 下载 rand_obj 的六个单臂任务和 pi05_base 权重，记录实际 Hugging Face revision
+python scripts/prepare_group_data.py --group single_arm
+
+# 确认：finetune_mode=full、六个单臂任务、gpus=0,1,2,3、fsdp_devices=4
+python scripts/train_group.py --dry-run
 
 # 检查真实数据、相机解码及指令
-python scripts/train_group.py --group single_arm --stage prepare \
-  --run-name single_baseline --gpus 0,1
-python scripts/train_group.py --group dual_arm --stage prepare \
-  --run-name dual_baseline --gpus 2,3
+python scripts/train_group.py --stage prepare --run-name single_full
 
 # 分组计算统计（train 阶段在统计不存在时也会自动计算）
-python scripts/train_group.py --group single_arm --stage stats \
-  --run-name single_baseline --gpus 0,1
-python scripts/train_group.py --group dual_arm --stage stats \
-  --run-name dual_baseline --gpus 2,3
+python scripts/train_group.py --stage stats --run-name single_full
 
-# 四张卡时，在两个终端分别执行；只有两张卡时依次使用 0,1
-python scripts/train_group.py --group single_arm \
-  --run-name single_baseline --gpus 0,1
-python scripts/train_group.py --group dual_arm \
-  --run-name dual_baseline --gpus 2,3
+# 正式全量微调：默认四卡 FSDP、全局 batch 32（每卡 8 条样本）
+python scripts/train_group.py --run-name single_full
 ```
 
-先进行真实数据短跑时，使用独立 run-name，例如：
+服务器有八卡时，这份配方先使用其中四卡。若指定其他卡号，prepare/stats/train 应保持同一配置。
+改为两卡时必须同时设 `--gpus 0,1 --fsdp-devices 2`，并根据实际显存调整 batch；不能只改可见卡数。
+若后续训练双臂，先准备数据/权重，再用独立 run；可使用另外四卡：
 
 ```bash
-python scripts/train_group.py --group single_arm --run-name real_single_smoke \
-  --gpus 0,1 --batch-size 2 --steps 20 --num-workers 0
+python scripts/prepare_group_data.py --group dual_arm
+python scripts/train_group.py --group dual_arm --run-name dual_full --gpus 4,5,6,7
 ```
 
 恢复完整训练：
 
 ```bash
-python scripts/train_group.py --group single_arm --run-name single_baseline \
-  --gpus 0,1 --resume
+python scripts/train_group.py --run-name single_full --resume
 ```
 
 运行记录包括 `resolved_config.yaml`、`data_manifest.json`、`environment.txt`、`train.log`。
 初始化模型、采样方式、数据、batch 和优化器设置在同一 run 内不能静默改变。
+旧 LoRA run 的快照没有 `finetune_mode` 时仍按 LoRA 构建，服务与恢复保持原结构；全量训练必须使用新的 run-name。
 支持恢复模型、优化器、随机步计数；上游 reader/sampler 迭代游标未持久化，因此不保证数据顺序逐帧复现。
 checkpoint 位于 `runs/<run-name>/checkpoints/pi05_<group>_multitask/<run-name>/<step>/`。
 
@@ -150,25 +182,25 @@ checkpoint 位于 `runs/<run-name>/checkpoints/pi05_<group>_multitask/<run-name>
 部署指 DexJoCo 仿真中的闭环推理。可以将整个 `runs/<run-name>/` 复制回本地，
 包含最终配置、checkpoint、assets 和统计；服务不需要训练数据。
 
-终端 A（openpi 环境）：
+终端 A（pi05 环境）：
 
 ```bash
-python scripts/serve_group.py --run-dir runs/single_baseline --gpus 0 --port 8000
+python scripts/serve_group.py --run-dir runs/single_full --gpus 0 --port 8000
 ```
 
 默认选该 run 最新完成的 checkpoint，可用 `--checkpoint <完整step目录>` 指定验证选出的版本。
 默认监听 127.0.0.1；客户端和服务不在同一机器时明确设置 `--host` 和网络访问。
-双臂换成 `runs/dual_baseline`，另一个服务可以使用端口 8001。
+双臂换成 `runs/dual_full`，另一个服务可以使用端口 8001。
 
 终端 B（dexjoco 环境）：
 
 ```bash
 conda activate dexjoco
 cd ~/physwam/dexjoco
-python scripts/evaluate_group.py --run-dir runs/single_baseline \
+python scripts/evaluate_group.py --run-dir runs/single_full \
   --port 8000 --seeds 0 1 2 --episodes 50
 python scripts/summarize_results.py \
-  --evaluation-dir runs/single_baseline/evaluation/rand_obj
+  --evaluation-dir runs/single_full/evaluation/rand_obj
 ```
 
 这表示每个任务、每个 seed 50 次，即单臂 6×3×50 次。
@@ -189,12 +221,12 @@ python scripts/summarize_results.py \
 ## 验证代码
 
 ```bash
-conda activate openpi
+conda activate pi05
 cd ~/physwam/dexjoco
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/test_group_framework.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/test_group_framework.py tests/test_pi05_finetuning.py
 ```
 
-测试覆盖组别维度、相机映射、指令保留、任务均衡采样、episode 选择、完整结果判定。
+测试覆盖组别维度、相机映射、指令保留、任务均衡采样、episode 选择、完整结果判定，以及全量/LoRA 模型构造与实际训练参数过滤器。
 ROS 的 pytest 自动插件可能与 Conda Python 不兼容，因此关闭无关插件自动加载。
 
 FastWAM 使用同一任务组和独立训练／推理入口，单臂动作直接使用 22 维。

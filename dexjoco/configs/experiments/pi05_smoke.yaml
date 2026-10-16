@@ -1,18 +1,21 @@
-# π0.5 单卡 H100 80GB 短跑：由 scripts/smoke_train_pi05.py 默认读取 pi05_smoke.yaml。
-# 使用完整 π0.5 LoRA、真实任务组数据与 base 权重，验证更新、验证 loss、checkpoint 保存和恢复。
-# 启动示例：python scripts/smoke_train_pi05.py --group single_arm --run-name h100_single_smoke --gpus 0
-# 使用真实 LeRobot 示范；正式长跑使用 h100_lora.yaml。
+# π0.5 四卡全量微调短跑：由 scripts/smoke_train_pi05.py 默认读取。
+# 与 pi05_full.yaml 使用相同模型和更新范围，验证更新、验证 loss、checkpoint 保存和恢复。
+# 启动示例：python scripts/smoke_train_pi05.py --run-name pi05_single_full_smoke
+# 使用真实 LeRobot 示范；正式长跑使用 pi05_full.yaml。
 
 # 【配置格式 / config】
 schema_version: 1                      # [配置格式] 配置结构版本，目前仅接受 1。
-model: pi05                            # [模型] 完整 π0.5 LoRA 模型。
+model: pi05                            # [模型] 完整 π0.5 模型。
+finetune_mode: full                    # [训练/更新范围] 全量更新视觉、语言、动作模块，不使用 LoRA。
+group: single_arm                     # [任务选择] 使用 single_arm.yaml 中全部六个任务。
 
 # 【模型 / model】
 action_horizon: 30                     # [模型/动作序列] 每次预测 30 步动作，保持 DexJoCo baseline 设置。
 max_token_len: 250                     # [模型/文本] 指令与离散状态的 token 总长度上限，不含图像 token。
 
 # 【GPU 与并行 / gpu】
-fsdp_devices: 1                        # [GPU/参数分片] 单卡不分片；用 --gpus 0 只暴露一张 H100 80GB。
+gpus: "0,1,2,3"                       # [GPU/可见卡] 默认四卡，与正式全量训练保持一致。
+fsdp_devices: 4                        # [GPU/参数分片] 四卡组成一个 FSDP 分片组。
 
 # 【数据 / data】
 sampling: task_balanced                # [数据/采样] 所选组各任务等概率；单臂六任务或双臂五任务共享一个模型。
@@ -30,10 +33,10 @@ checkpoint_paths:                      # [初始化/路径] 按 --group 选择�
 
 # 【训练与优化 / train】
 seed: 42                               # [训练/随机性] 模型、任务采样与归一化统计的随机种子。
-batch_size: 1                          # [训练/批次] 全局 batch=1；单卡首轮先验证完整模型链路。
+batch_size: 4                          # [训练/批次] 四卡合计全局 batch=4，每卡处理一条样本。
 num_workers: 0                         # [数据/CPU] 主进程加载，便于定位真实数据读取错误；不是 GPU 数。
 num_train_steps: 20                    # [训练/预算] smoke 先更新 20 步，保存恢复后再更新 1 步。
-learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前实现预热后保持此值。
+learning_rate: 5.0e-05                 # [训练/优化] 预热后的学习率；当前实现预热后保持此值。
 warmup_steps: 2                        # [训练/预热] 短跑前 2 步预热，避免沿用正式训练的 10000 步预热。
 
 # 【日志与模型保存 / logging & checkpoint】
@@ -46,5 +49,5 @@ keep_period: null                      # [保存/保留] 不额外保留周期�
 validation_ratio: 0.1                  # [验证/划分] 每任务留出约 10% 完整 episode；至少各保留一条训练和验证示范。
 validation_seed: 42                    # [验证/随机性] 固定 episode 划分、验证帧子集和验证噪声。
 validation_interval: 10                # [验证/频率] 第 10、20 次更新后验证；恢复后额外的第 21 步只检查训练继续。
-validation_batch_size: 1               # [验证/GPU] 全局验证 batch=1，与单卡训练 batch 一致。
+validation_batch_size: 4               # [验证/GPU] 四卡合计全局验证 batch=4。
 validation_max_batches: 2              # [验证/预算] 每任务最多验证 2 批，先检查链路；正式训练改为 null 遍历全量。

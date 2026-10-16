@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -14,7 +15,8 @@ import yaml
 ROOT = Path(os.environ.get("DEXJOCO_TEST_ROOT", Path(__file__).resolve().parents[1]))
 FASTWAM_ROOT = Path(os.environ.get("FASTWAM_TEST_ROOT", ROOT.parent / "fastwam"))
 sys.path[:0] = [str(FASTWAM_ROOT), str(FASTWAM_ROOT / "src"),
-                str(Path(__file__).resolve().parents[1] / "dexjoco")]
+                str(Path(__file__).resolve().parents[1] / "dexjoco"),
+                str(Path(__file__).resolve().parents[1] / "scripts")]
 from experiments.dexjoco.config import build_config, select_group
 from experiments.dexjoco.data import compute_stats, inspect_task
 from experiments.dexjoco.transforms import MinMaxNormalizer, pack_images
@@ -23,8 +25,47 @@ from dexjoco_fastwam_client.evaluate import execute_episode, validate_metadata
 
 @pytest.fixture
 def experiment():
-    path = Path(__file__).resolve().parents[1] / "configs/experiments/fastwam_baseline.yaml"
+    path = Path(__file__).resolve().parents[1] / "configs/experiments/fastwam_single.yaml"
     return yaml.safe_load(path.read_text())
+
+
+@pytest.mark.parametrize("profile,steps", [("fastwam_single", 20000), ("fastwam_smoke", 20)])
+def test_cli_reads_four_gpu_single_task_profile_without_explicit_launch_flags(profile, steps):
+    script = Path(__file__).resolve().parents[1] / "scripts/train_fastwam_group.py"
+    result = subprocess.run([sys.executable, str(script), "--experiment",
+                             f"configs/experiments/{profile}.yaml", "--run-name", "profile_contract", "--dry-run"],
+                            capture_output=True, text=True, check=True)
+    config = yaml.safe_load(result.stdout)
+    framework = config["framework"]
+    assert framework["launch"] == {"gpus": "0,1,2,3", "num_processes": 4, "effective_global_batch_size": 4}
+    assert framework["group"]["name"] == "single_arm"
+    assert [t["name"] for t in framework["group"]["tasks"]] == ["water_plant"]
+    assert config["max_steps"] == steps
+    assert config["model"]["action_dit_config"]["action_dim"] == 22
+    if profile == "fastwam_smoke":
+        assert config["save_every"] == 10
+        assert framework["experiment"]["validation_max_batches"] == 2
+
+
+def test_cli_flags_override_profile_gpu_task_group_and_budget():
+    script = Path(__file__).resolve().parents[1] / "scripts/train_fastwam_group.py"
+    result = subprocess.run([sys.executable, str(script), "--run-name", "profile_override", "--dry-run",
+                             "--group", "dual_arm", "--tasks", "bimanual_assembly",
+                             "--gpus", "4,5", "--batch-size", "2", "--steps", "30"],
+                            capture_output=True, text=True, check=True)
+    config = yaml.safe_load(result.stdout)
+    assert config["framework"]["launch"] == {"gpus": "4,5", "num_processes": 2, "effective_global_batch_size": 4}
+    assert config["model"]["action_dit_config"]["action_dim"] == 44
+    assert config["max_steps"] == 30
+    assert [t["name"] for t in config["framework"]["group"]["tasks"]] == ["bimanual_assembly"]
+
+
+@pytest.mark.parametrize("gpus", ["0,0", "0,,2", "not-a-gpu"])
+def test_invalid_launch_gpu_selection_fails_during_dry_run(gpus):
+    script = Path(__file__).resolve().parents[1] / "scripts/train_fastwam_group.py"
+    result = subprocess.run([sys.executable, str(script), "--run-name", "invalid_launch", "--dry-run", "--gpus", gpus],
+                            capture_output=True, text=True)
+    assert result.returncode == 2
 
 
 @pytest.mark.parametrize("group,dims,count", [("single_arm", (23, 22), 6), ("dual_arm", (46, 44), 5)])

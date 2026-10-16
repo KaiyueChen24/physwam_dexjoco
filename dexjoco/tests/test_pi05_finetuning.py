@@ -14,8 +14,11 @@ from group_common import (build_train_config, get_finetune_mode, load_group, rea
                           resolve, training_parser, write_run)
 
 
-@pytest.mark.parametrize("experiment,batch,steps", [("pi05_full", 32, 60000), ("pi05_smoke", 4, 20)])
-def test_profiles_select_full_single_arm_group_and_four_gpus(experiment, batch, steps, monkeypatch):
+@pytest.mark.parametrize("experiment,batch,steps,gpus,fsdp", [
+    ("pi05_full", 128, 100000, "0,1,2,3,4,5,6,7", 8),
+    ("pi05_smoke", 4, 20, "0,1,2,3", 4),
+])
+def test_profiles_select_full_single_arm_group_and_expected_gpu_layout(experiment, batch, steps, gpus, fsdp, monkeypatch):
     # resolve changes CUDA visibility, so restore the environment after each test.
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
     monkeypatch.setenv("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -25,9 +28,10 @@ def test_profiles_select_full_single_arm_group_and_four_gpus(experiment, batch, 
     assert resolved["group"]["name"] == "single_arm"
     assert resolved["group"]["tasks"] == load_group("single_arm")["tasks"]
     assert len(resolved["group"]["tasks"]) == 6
-    assert resolved["gpus"] == "0,1,2,3"
+    assert resolved["gpus"] == gpus
     assert resolved["experiment"]["finetune_mode"] == "full"
-    assert resolved["experiment"]["fsdp_devices"] == 4
+    assert resolved["experiment"]["fsdp_devices"] == fsdp
+    assert resolved["experiment"]["validation_batch_size"] % len(gpus.split(",")) == 0
     assert resolved["experiment"]["batch_size"] == batch
     assert resolved["experiment"]["num_train_steps"] == steps
 

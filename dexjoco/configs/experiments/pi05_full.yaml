@@ -13,8 +13,8 @@ action_horizon: 30                      # [模型/动作序列] 一次预测 30 
 max_token_len: 250                      # [模型/文本] 任务指令与离散状态的 token 总长度上限；不含图像 token。
 
 # 【GPU 与并行 / gpu】
-gpus: "0,1,2,3"                         # [GPU/可见卡] 默认使用四张卡；--gpus 可覆盖。
-fsdp_devices: 4                         # [GPU/参数分片] 四卡组成一个 FSDP 分片组；须整除可见卡数。
+gpus: "0,1,2,3,4,5,6,7"                 # [GPU/可见卡] 正式训练使用八张 H100；--gpus 可覆盖。
+fsdp_devices: 8                         # [GPU/参数分片] 八卡组成一个 FSDP 分片组；须整除可见卡数。
 
 # 【数据 / data】
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
@@ -32,8 +32,8 @@ checkpoint_paths:                       # [初始化/路径] 按 --group 选择�
 
 # 【训练与优化 / train】
 seed: 42                                # [训练/随机性] 模型、数据采样与统计使用的随机种子。
-batch_size: 128                          # [训练/批次] 所有 GPU 合计的全局 batch；必须能被可见 GPU 数整除。
-num_workers: 8                          # [数据/CPU] 视频解码与预处理进程数；先测 4/8/16 的吞吐，0 为主进程加载。
+batch_size: 128                          # [训练/批次] 全局 batch 128，八卡每卡 16；维持原来的样本预算。
+num_workers: 16                         # [数据/CPU] 视频解码与预处理进程数；须结合可用 CPU 与实测吞吐调整。
 num_train_steps: 100000                 # [训练/预算] 参数更新总步数，不是 epoch；本配方单、双臂均用此值。
 learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前 Python 将衰减终点设为相同值。
 warmup_steps: 10000                     # [训练/预热] 前多少次更新逐渐提高学习率，之后维持 learning_rate。

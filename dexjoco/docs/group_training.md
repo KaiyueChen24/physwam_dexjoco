@@ -47,11 +47,11 @@ cd dexjoco
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
 - `pi05_smoke.yaml`：四卡 FSDP、真实数据与 base 权重、全量微调、全局 batch 4、20 步短跑。
-- `pi05_full.yaml`：默认单臂全部六任务联合训练，四卡 FSDP、全量微调、全局 batch 32、60,000 步起点。
+- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 128、100,000 步；CPU 加载进程 16。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
 - 两份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
-- `--group`、`--gpus` 覆盖 YAML；省略时默认 `single_arm`、`0,1,2,3`。组内六个任务各以 1/6 概率采样，共享一个模型。
-- 全局 batch 必须能被可见 GPU 数整除；`fsdp_devices` 必须整除可见 GPU 数。默认 4 表示一个四卡分片组；1 表示不分片的数据并行。
+- `--group`、`--gpus` 覆盖 YAML；正式配置默认 `single_arm`、`0,1,2,3,4,5,6,7`，smoke 仍使用四卡。组内六个任务各以 1/6 概率采样，共享一个模型。
+- 全局 batch 必须能被可见 GPU 数整除；`fsdp_devices` 必须整除可见 GPU 数。正式默认 8 表示一个八卡分片组；1 表示不分片的数据并行。
 - 当前任务均衡采样支持单进程 JAX 的单机多卡，不支持多节点或 PyTorch DDP。
 - 各任务先通过自己的 LeRobot reader 构造动作 chunk，再统一相机字段；chunk 不跨 episode。
 - `task_balanced` 使每个任务获得相同采样概率；`frame_uniform` 按所有帧均匀采样。
@@ -97,7 +97,7 @@ validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；�
 
 ## 四卡全量微调 smoke test
 
-`pi05_smoke.yaml` 使用与正式训练一致的全量更新范围和四卡 FSDP，缩小 batch 和步数以检查链路。
+`pi05_smoke.yaml` 使用与正式训练一致的全量更新范围，以四卡 FSDP、较小 batch 和步数检查链路；正式配置使用八卡 FSDP。
 默认单臂六任务共享一个 π0.5 模型；实际峰值显存与编译耗时需要在服务器短跑确认。
 先准备所选任务组的全部数据和 base 权重；每个任务至少有两条候选 episode，才能划分训练和验证。
 
@@ -143,7 +143,7 @@ cd ~/physwam/dexjoco
 # 下载 rand_obj 的六个单臂任务和 pi05_base 权重，记录实际 Hugging Face revision
 python scripts/prepare_group_data.py --group single_arm
 
-# 确认：finetune_mode=full、六个单臂任务、gpus=0,1,2,3、fsdp_devices=4
+# 确认：finetune_mode=full、六个单臂任务、gpus=0,1,2,3,4,5,6,7、fsdp_devices=8
 python scripts/train_group.py --dry-run
 
 # 检查真实数据、相机解码及指令
@@ -152,17 +152,17 @@ python scripts/train_group.py --stage prepare --run-name single_full
 # 分组计算统计（train 阶段在统计不存在时也会自动计算）
 python scripts/train_group.py --stage stats --run-name single_full
 
-# 正式全量微调：默认四卡 FSDP、全局 batch 128（每卡 32 条样本）
+# 正式全量微调：默认八卡 FSDP、全局 batch 128（每卡 16 条样本）
 python scripts/train_group.py --run-name single_full
 ```
 
-服务器有八卡时，这份配方先使用其中四卡。若指定其他卡号，prepare/stats/train 应保持同一配置。
+这份正式配方占用八张卡；启动前确认卡均可用，并已获得对应资源。若指定其他卡号，prepare/stats/train 应保持同一配置。
 改为两卡时必须同时设 `--gpus 0,1 --fsdp-devices 2`，并根据实际显存调整 batch；不能只改可见卡数。
-若后续训练双臂，先准备数据/权重，再用独立 run；可使用另外四卡：
+若后续训练双臂，先准备数据/权重，再用独立 run；以下命令在单臂八卡训练结束或停止后运行：
 
 ```bash
 python scripts/prepare_group_data.py --group dual_arm
-python scripts/train_group.py --group dual_arm --run-name dual_full --gpus 4,5,6,7
+python scripts/train_group.py --group dual_arm --run-name dual_full
 ```
 
 恢复完整训练：
@@ -177,11 +177,48 @@ python scripts/train_group.py --run-name single_full --resume
 支持恢复模型、优化器、随机步计数；上游 reader/sampler 迭代游标未持久化，因此不保证数据顺序逐帧复现。
 checkpoint 位于 `runs/<run-name>/checkpoints/pi05_<group>_multitask/<run-name>/<step>/`。
 
+## 八卡训练使用 tmux
+
+以下命令在 H100 服务器执行；tmux 让 SSH 断开后训练继续运行。
+没有 tmux 时用 `sudo apt-get install tmux`，没有安装权限则可在 pi05 环境使用 `conda install -c conda-forge tmux`。
+先同步代码，检查 `nvidia-smi` 中八卡均可用；已有训练不要重复启动。
+
+```bash
+tmux new-session -s pi05_8gpu
+```
+
+进入 tmux 后运行（按实际服务器路径调整）：
+
+```bash
+source "$HOME/miniforge3/etc/profile.d/conda.sh"
+conda activate pi05
+source "$HOME/.config/physwam/pi05-env.sh"
+cd /aifs/chenkaiyue/physwam/dexjoco
+export WANDB_MODE=online
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+unset JAX_PLATFORMS JAX_PLATFORM_NAME WANDB_RUN_ID WANDB_RESUME
+RUN="pi05_single_full_8gpu_$(date +%Y%m%d_%H%M%S)"
+mkdir -p logs "runs/$RUN"
+export WANDB_DIR="$PWD/runs/$RUN"
+set -o pipefail
+python -u scripts/train_group.py \
+  --experiment configs/experiments/pi05_full.yaml \
+  --group single_arm --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
+  --batch-size 128 --num-workers 16 --run-name "$RUN" \
+  2>&1 | tee "logs/$RUN.launch.log"
+```
+
+这是新 run，从 base 权重开始，不加 `--resume`；不需要 nohup 或 `&`。
+先按 `Ctrl+B`，松开后按 `D` 可退出查看而保留训练；`tmux attach -t pi05_8gpu` 返回会话。
+在训练窗口直接按 `Ctrl+C` 会停止前台训练；tmux 不会在进程被终止时自动保存 checkpoint。
+`tmux ls` 查看会话。batch 仍为 128，学习率、100000 步预算、验证和保存间隔均保持原设置；
+八卡的提速幅度需实测，数据供应不足时增加 GPU 不能消除等待。
+
 ## 数据加载与 GPU 空闲排查
 
-`pi05_full.yaml` 的 `num_workers` 从 4 调整为 8，控制 CPU 视频解码、图像变换和组批的进程数。
+`pi05_full.yaml` 的 `num_workers` 设为 16，控制 CPU 视频解码、图像变换和组批的进程数。
 这只是起点，不保证 8 或 16 一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
-保持 batch=128、模型和数据不变，先对 4/8/16 做对照。检查当前作业的 CPU 亲和性与线程配额：
+保持 batch=128、模型和数据不变，先对 4/8/16 做对照。查看当前进程可用的 CPU 逻辑核数：
 
 ```bash
 nproc
@@ -192,7 +229,7 @@ nproc
 单次脚本结束会退出加载进程。示例中的 run-name 替换为实际 batch 128 实验：
 
 ```bash
-RUN=pi05_single_full_b128_实际时间戳
+RUN=pi05_single_full_8gpu_实际时间戳
 for workers in 4 8 16; do
   python scripts/benchmark_pi05_data.py --run-dir "runs/$RUN" \
     --num-workers "$workers" --warmup-batches 8 --batches 64
@@ -200,17 +237,18 @@ done
 ```
 
 比较 `samples_per_second`（越高越好）、`seconds_per_batch_mean` 和 `seconds_per_batch_p95`（越低越好）。
-测试包括视频解码、训练数据变换、组批和 CPU Tensor 转换，不包括 GPU 搬运、模型计算和四卡通信。
+测试包括视频解码、训练数据变换、组批和 CPU Tensor 转换，不包括 GPU 搬运、模型计算和多卡通信。
 第一次运行可能遇到冷文件缓存；对最好的候选重复一次确认，不能把 CPU 测试吞吐当成 GPU 训练吞吐。
 
 同步本次代码后，可以在已有 checkpoint 的原 run 恢复时只调整 workers，无需从 base 重训：
 
 ```bash
 python scripts/train_group.py --experiment configs/experiments/pi05_full.yaml \
-  --run-name "$RUN" --gpus 0,1,2,3 --fsdp-devices 4 \
-  --batch-size 128 --num-workers 8 --resume
+  --run-name "$RUN" --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
+  --batch-size 128 --num-workers 16 --resume
 ```
 
+此例假定原 run 也是八卡 FSDP=8；不能将原四卡 FSDP=4 run 直接改为八卡恢复。
 先确认上一进程已停止且 checkpoint 完整写入；恢复会从最近保存点开始，未保存的更新不能恢复。
 加载进程数变更写入 `runtime_changes.jsonl`，当前配置更新到 `resolved_config.yaml`。
 batch、学习率、模型、数据划分等设置仍不允许在原 run 内更改；reader/sampler 游标仍不保证逐帧复现。

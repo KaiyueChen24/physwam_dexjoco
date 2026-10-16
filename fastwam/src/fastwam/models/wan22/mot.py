@@ -4,6 +4,7 @@ from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from .wan_video_dit import flash_attention, modulate, rope_apply
 from fastwam.utils.logging_config import get_logger
@@ -25,9 +26,7 @@ class MoT(nn.Module):
 
         self.mixtures = nn.ModuleDict(mixtures)
         self.expert_order = list(self.mixtures.keys())
-        if mot_checkpoint_mixed_attn:
-            raise ValueError("Wan MoT gradient checkpointing is not supported by the compiled tensor core.")
-        self.mot_checkpoint_mixed_attn = False
+        self.mot_checkpoint_mixed_attn = bool(mot_checkpoint_mixed_attn)
         self.compile_training_layers = False
 
         first_expert = self.mixtures[self.expert_order[0]]
@@ -50,17 +49,6 @@ class MoT(nn.Module):
                     "All experts must have same attn_head_dim; "
                     f"got {self.attn_head_dim} and {expert.attn_head_dim}"
                 )
-        checkpointed_experts = [
-            name
-            for name in self.expert_order
-            if bool(getattr(self.mixtures[name], "use_gradient_checkpointing", False))
-        ]
-        if checkpointed_experts:
-            raise ValueError(
-                "Wan expert gradient checkpointing is not supported by the compiled tensor core: "
-                f"{checkpointed_experts}."
-            )
-        
         logger.info(f"Initialized MoT with experts: {self.expert_order}, num_layers={self.num_layers}")
         for name in self.expert_order:
             expert = self.mixtures[name]
@@ -94,6 +82,14 @@ class MoT(nn.Module):
     ) -> torch.Tensor:
         attn_mask = attention_mask.to(device=q_cat.device)
 
+        if self.mot_checkpoint_mixed_attn and self.training and torch.is_grad_enabled():
+            return checkpoint(
+                flash_attention,
+                q_cat, k_cat, v_cat,
+                num_heads=self.num_heads,
+                ctx_mask=attn_mask,
+                use_reentrant=False,
+            )
         return flash_attention(
             q=q_cat,
             k=k_cat,
@@ -261,8 +257,8 @@ class MoT(nn.Module):
                 context_payload=_context_payload,
             )
 
-        if use_gradient_checkpointing and self.training:
-            return torch.utils.checkpoint.checkpoint(
+        if use_gradient_checkpointing and self.training and torch.is_grad_enabled():
+            return checkpoint(
                 _post_fn,
                 mixed_slice,
                 residual_x,
@@ -676,6 +672,20 @@ class MoT(nn.Module):
         action_context_mask: torch.Tensor,
         attention_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Recompute the entire joint layer, including QKV, mixed attention and
+        # both expert FFNs. Expert post-block checkpointing alone would leave
+        # the tensor-only training path's attention activations in memory.
+        checkpoint_layers = self.training and torch.is_grad_enabled() and (
+            self.mot_checkpoint_mixed_attn
+            or any(
+                bool(getattr(expert, "use_gradient_checkpointing", False))
+                for expert in self.mixtures.values()
+            )
+        )
+        if checkpoint_layers and self.compile_training_layers:
+            raise ValueError(
+                "Wan MoT gradient checkpointing requires compile_training_denoise=False."
+            )
         if self.training and self.compile_training_layers and not hasattr(self, "_compiled_joint_layer"):
             self._compiled_joint_layer = torch.compile(
                 self._forward_joint_layer,
@@ -690,21 +700,27 @@ class MoT(nn.Module):
                 if self.training and self.compile_training_layers
                 else self._forward_joint_layer
             )
-            x_video, x_action = layer(
-                video_block=self.mixtures["video"].blocks[layer_idx],
-                action_block=self.mixtures["action"].blocks[layer_idx],
-                video_tokens=x_video,
-                action_tokens=x_action,
-                video_freqs=video_freqs,
-                action_freqs=action_freqs,
-                video_t_mod=video_t_mod,
-                action_t_mod=action_t_mod,
-                video_context=video_context,
-                video_context_mask=video_context_mask,
-                action_context=action_context,
-                action_context_mask=action_context_mask,
-                attention_mask=attention_mask,
+            # Pass both blocks and tensors explicitly: backward must use the
+            # original layer, and checkpoint must see tensors to preserve CUDA RNG.
+            layer_args = (
+                self.mixtures["video"].blocks[layer_idx],
+                self.mixtures["action"].blocks[layer_idx],
+                x_video,
+                x_action,
+                video_freqs,
+                action_freqs,
+                video_t_mod,
+                action_t_mod,
+                video_context,
+                video_context_mask,
+                action_context,
+                action_context_mask,
+                attention_mask,
             )
+            if checkpoint_layers:
+                x_video, x_action = checkpoint(layer, *layer_args, use_reentrant=False)
+            else:
+                x_video, x_action = layer(*layer_args)
         return x_video, x_action
 
     def forward(

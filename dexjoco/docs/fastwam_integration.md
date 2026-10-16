@@ -55,6 +55,11 @@ Torch 先安装；DeepSpeed 在该环境中构建，安装阶段隐藏 GPU、关
 默认检查 pip 依赖、CPU 参数更新、小视频解码、Parquet/消息传输和训练配方解析，不需要空闲 GPU。
 `--check-gpu 0` 另验证指定单卡 BF16 前向/反向及 NCCL 可用性，不启动多卡通信或完整训练。
 
+手动安装的环境可直接运行 `scripts/check_fastwam_env.py`。默认按项目依赖核对训练库，
+对 PyYAML、websockets、msgpack 检查运行接口兼容范围，不要求 wheel、setuptools、pytest
+与安装配方逐版本一致。一键安装器会加 `--strict-versions`，额外核对完整安装约束。
+例如 wheel 0.48.0 不会单独使手动环境自检失败；训练依赖和实际视频/GPU 运算仍需通过检查。
+
 按脚本输出加载 Conda，然后在每个新终端激活并加载本机设置：
 
 ```bash
@@ -236,6 +241,31 @@ python scripts/summarize_results.py \
 同一 evaluation-name 固定 checkpoint SHA256、配置签名、任务、步数和随机化设置，
 已有完成 job 跳过；失败 job 需 `--retry-failed`。缺失 job 不报告完整任务均值。
 控制 hz 按示范标注及环境 step 接口定义；无需修改 MuJoCo 内部 physics_dt。
+
+## 梯度检查点与启动兼容性
+
+DexJoCo 配方使用 `gradient_checkpointing: true`，生成的模型配置保持
+`compile_training_denoise: false`。MoT 的 `forward_joint_core` 在训练且启用梯度时，
+以非重入检查点逐层重计算完整 video/action 联合层，包括 QKV、混合注意力、
+交叉注意力和 FFN；推理与只前向验证不启用重计算。目前训练编译与该检查点路径
+不能同时开启，冲突时会提示关闭 `compile_training_denoise`。
+
+如果旧版启动报 `Wan MoT gradient checkpointing is not supported by the compiled tensor core`，
+需同步 `fastwam/src/fastwam/models/wan22/mot.py` 的检查点实现。
+仅删除异常检查或关闭实验 YAML 中的显存优化，并不能验证这条训练路径正确。
+该错误发生在模型构造阶段；同步修复后可沿用原 run 配置、统计量和已完成的 ActionDiT
+初始化，直接重试 `--stage train`，不需重新 `initialize`。
+
+以下 CPU 回归测试不下载权重，覆盖真实微型 Wan/Action DiT 的多层前向、输入和参数梯度、
+反向重计算、激活保存量、完整训练 loss 与优化器更新：
+
+```bash
+# 在 DexJoCo 根目录、FastWAM 环境执行
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+  python -m pytest -q tests/test_fastwam_checkpointing.py
+```
+
+这些检查不替代目标服务器的四卡 BF16/DeepSpeed 训练与显存验证。
 
 ## 运行产物与验证
 

@@ -111,6 +111,7 @@ def test_install_order_cpu_default_and_independent_settings(setup_env):
     assert not any("jax" in " ".join(e["args"]).lower() for e in installs)
     checks = [e for e in events if any(a.endswith("check_fastwam_env.py") for a in e["args"])]
     assert len(checks) == 1 and "cpu" in checks[0]["args"] and checks[0]["offline"] == "1"
+    assert "--strict-versions" in checks[0]["args"]
     assert all(e["cuda"] == "" for e in events if e["args"][0] == "run")
     assert all(e["proxy"] == "http://127.0.0.1:18888" for e in events)
     assert (settings / "pi05-env.sh").read_text() == "pi05 configuration stays intact"
@@ -146,6 +147,7 @@ def test_prefix_and_explicit_gpu_check(setup_env):
             assert event["args"][event["args"].index("-p") + 1] == str(prefix)
     gpu = [e for e in events if "gpu" in e["args"]]
     assert len(gpu) == 1 and gpu[0]["cuda"] == "3"
+    assert "--strict-versions" in gpu[0]["args"]
     assert all(e["cuda"] == "" for e in events if e["args"][0] == "run" and "pip" in e["args"])
 
 

@@ -203,11 +203,11 @@ run_python -m pip check
 # 【验证】CPU 检查不构造完整模型、不下载权重；GPU 运算仅在显式 --check-gpu 时执行。
 STEP='CPU 导入、视频、数据、传输和配置检查'
 HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
-run_python "$DEX_ROOT/scripts/check_fastwam_env.py" --mode cpu \
+run_python "$DEX_ROOT/scripts/check_fastwam_env.py" --mode cpu --strict-versions \
     --dexjoco-root "$DEX_ROOT" --constraints "$CONSTRAINTS" --report "$VERSIONS_FILE"
 if [[ -n "$GPU_INDEX" ]]; then
     STEP='指定 GPU 的 PyTorch BF16 运算检查'
-    run_gpu_python "$DEX_ROOT/scripts/check_fastwam_env.py" --mode gpu \
+    run_gpu_python "$DEX_ROOT/scripts/check_fastwam_env.py" --mode gpu --strict-versions \
         --dexjoco-root "$DEX_ROOT" --constraints "$CONSTRAINTS" --report "$VERSIONS_FILE"
 fi
 

@@ -25,6 +25,38 @@ def test_cpu_video_and_parquet_round_trip(monkeypatch):
     checker.check_video_and_parquet()
 
 
+def test_manual_environment_accepts_newer_build_tools_and_runtime_patch_versions(monkeypatch):
+    installed = {"torch": "2.7.1+cu128", "wheel": "0.48.0", "setuptools": "81.0.0",
+                 "pytest": "9.0.0", "PyYAML": "6.0.3", "websockets": "15.0.1", "msgpack": "1.1.2"}
+    requested = []
+    def version(name):
+        requested.append(name)
+        return installed[name]
+    monkeypatch.setattr(checker.metadata, "version", version)
+    checker.check_environment_requirements(["torch==2.7.1+cu128"], ["wheel==0.45.1", "pytest==8.3.5"])
+    assert not {"wheel", "setuptools", "pytest"}.intersection(requested)
+
+
+def test_strict_installer_still_requires_the_pinned_build_tools(monkeypatch):
+    installed = {"torch": "2.7.1+cu128", "wheel": "0.48.0"}
+    monkeypatch.setattr(checker.metadata, "version", installed.__getitem__)
+    with pytest.raises(RuntimeError, match="wheel=0.48.0"):
+        checker.check_environment_requirements(["torch==2.7.1+cu128"], ["wheel==0.45.1"], strict_versions=True)
+
+
+def test_manual_environment_still_rejects_wrong_training_dependencies(monkeypatch):
+    monkeypatch.setattr(checker.metadata, "version", lambda name: "2.7.1+cu126")
+    with pytest.raises(RuntimeError, match="torch=2.7.1"):
+        checker.check_environment_requirements(["torch==2.7.1+cu128"], [])
+
+
+def test_manual_environment_rejects_unsupported_runtime_api(monkeypatch):
+    installed = {"PyYAML": "6.0.3", "websockets": "13.1", "msgpack": "1.1.2"}
+    monkeypatch.setattr(checker.metadata, "version", installed.__getitem__)
+    with pytest.raises(RuntimeError, match="websockets=13.1"):
+        checker.check_environment_requirements([], [])
+
+
 def test_gpu_check_fails_on_cpu_environment():
     import torch
     if torch.cuda.is_available():

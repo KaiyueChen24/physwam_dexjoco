@@ -60,6 +60,9 @@ FastWAM 的训练依赖版本来自 `fastwam/pyproject.toml`，附加工具版�
 上述 evdev 仅适用于 π0.5；FastWAM 安装器不安装 OpenPI 模型、JAX 或仿真依赖。
 FastWAM 按 Torch → DeepSpeed → FastWAM/轻量客户端顺序安装，默认检查实际小视频解码、
 Parquet、消息传输和两份训练配方的 dry-run。单卡自检不替代四卡 DeepSpeed smoke。
+手动运行 FastWAM 的 `scripts/check_fastwam_env.py` 时，默认不锁定 wheel、setuptools、pytest；
+仅按项目依赖检查训练库，并核对附加运行库的兼容范围。
+`--strict-versions` 是该检查脚本的选项，额外核对安装约束；一键安装器自动传入此选项。
 
 ### 每台服务器的缓存与代理
 

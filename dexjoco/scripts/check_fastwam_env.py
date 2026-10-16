@@ -23,6 +23,17 @@ def check_requirements(requirements):
             raise RuntimeError(f"依赖版本不符：{requirement.name}={actual}，需要 {requirement.specifier}")
 
 
+def check_environment_requirements(requirements, constraints, *, strict_versions=False):
+    # The model/training dependencies still follow the upstream project's exact pins.
+    check_requirements(requirements)
+    if strict_versions:
+        check_requirements(constraints)
+    else:
+        # These are runtime API requirements. Build/test tools (wheel, setuptools,
+        # pytest) are installation recipe pins, not prerequisites for policy execution.
+        check_requirements(["PyYAML>=6,<7", "websockets>=14,<16", "msgpack>=1.0.5,<2"])
+
+
 def check_video_and_parquet():
     import av
     import numpy as np
@@ -121,6 +132,8 @@ def main():
     parser.add_argument("--dexjoco-root", required=True, type=Path)
     parser.add_argument("--constraints", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--strict-versions", action="store_true",
+                        help="额外严格核对安装约束中的构建/测试工具版本；一键安装器使用此选项")
     args = parser.parse_args()
     root = args.dexjoco_root.resolve()
     if sys.version_info[:2] != (3, 10):
@@ -129,15 +142,18 @@ def main():
     requirements = metadata.requires("fastwam")
     if not requirements:
         raise RuntimeError("缺少 FastWAM 安装依赖元数据，请重新执行安装器")
-    check_requirements([*requirements, *args.constraints.read_text().splitlines()])
+    check_environment_requirements(requirements, args.constraints.read_text().splitlines(),
+                                   strict_versions=args.strict_versions)
     sys.path.insert(0, str(root.parent / "fastwam"))
     if args.mode == "cpu":
         report = {"python": sys.version, "source_dir": str(root.parent), **check_cpu(root),
+                  "strict_versions": args.strict_versions,
                   "packages": {d.metadata["Name"]: d.version for d in metadata.distributions() if d.metadata["Name"]}}
         print("FastWAM CPU 环境检查通过")
     else:
         report = json.loads(args.report.read_text())
         report.update(check_gpu())
+        report["strict_versions"] = args.strict_versions
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 

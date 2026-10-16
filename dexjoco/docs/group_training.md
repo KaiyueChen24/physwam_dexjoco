@@ -66,9 +66,9 @@ cd dexjoco
 # 【验证 / validation：只计算 loss，不反向传播】
 validation_ratio: 0.1          # [数据/划分] 每任务留出完整 episode 的比例；0 关闭
 validation_seed: 42            # [验证/随机性] 固定 episode 划分与验证噪声
-validation_interval: 1000      # [验证/频率] 每多少次更新计算一次；训练最后一步也计算
-validation_batch_size: 8       # [验证/GPU] π0.5 所有 GPU 合计的 batch，须能被可见卡数整除
-validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；整数限制每任务的验证批次数
+validation_interval: 2000      # [验证/频率] 每多少次更新计算一次；训练最后一步也计算
+validation_batch_size: 32      # [验证/GPU] π0.5 全局 batch；八卡每卡 4，须能被可见卡数整除
+validation_max_batches: 12     # [验证/预算] 每任务最多 384 帧；null 才遍历全部留出帧
 ```
 
 全量短跑使用验证间隔 10、全局验证 batch 4，每任务最多 2 批；正式配方按 validation_max_batches 控制每任务预算。
@@ -81,7 +81,7 @@ validation_max_batches: null   # [验证/预算] null 遍历全部留出帧；�
 同一个 run 的比例、种子或候选数据不能改变；恢复会核对配置与 `data_split.json`。已有无验证的实验需要使用新的 run-name。
 
 验证逐任务遍历留出帧，动作 chunk 保持在各自 episode 内，复用训练归一化，关闭训练模式与数据增强。
-尾批次补齐只为满足 JAX 分片形状，重复项不计入 loss。默认全量验证不丢最后不足一个 batch 的样本。
+尾批次补齐只为满足 JAX 分片形状，重复项不计入 loss。全量验证时不丢最后不足一个 batch 的样本。
 `task_balanced` 汇总为各任务平均 loss 的算术平均；`frame_uniform` 按实际验证样本数加权。
 如果设置批次上限，则每任务使用固定随机帧子集，记录 `full_validation: false`，不会冒充全量验证。
 
@@ -300,9 +300,13 @@ wandb login
 GPU 系统指标通常以时间为横轴，loss 以已完成的优化器更新次数为横轴。
 这不是逐任务训练 loss；当前需求采用逐任务验证 loss 衡量每个任务的留出集表现。
 
-正式配置 `validation_ratio: 0.1` 按完整 episode 留出，`validation_max_batches: 50` 限制每任务最多 50 批；设为 null 才遍历全部留出帧。
+正式配置 `validation_ratio: 0.1` 按完整 episode 留出，`validation_batch_size: 32`、`validation_max_batches: 12` 限制每任务最多 384 帧；设为 null 才遍历全部留出帧。
 同一模型依次计算六任务的验证 loss，不更新模型，最终 `val/loss` 为六个任务平均 loss 的等权平均。
-训练预算由 num_train_steps 指定；例如 100000 步、验证间隔 1000 时，验证发生在 1000、2000、…、100000，共 100 次。
+训练预算由 num_train_steps 指定；当前 100000 步、验证间隔 2000 时，验证发生在 2000、4000、…、100000，共 50 次。
+每任务留出 10% 完整 episode 是数据隔离规则；每次最多测 384 帧是计算预算，两者相互独立。
+单臂六任务每次最多验证 2304 帧、72 次前向调用；原 batch 8、每任务 50 批为 2400 帧、300 次前向调用。
+样本预算接近，减少前向调用不等于验证耗时同比缩短：当前验证仍在主进程逐帧准备图像，训练 num_workers 不控制验证加载。
+固定子集便于比较同一 run 的 loss；较少帧数可能漏掉某些留出 episode，不能替代最终完整验证。
 它计算的是验证 loss；DexJoCo 闭环成功率由独立评测脚本计算，不在训练期间自动运行。
 完整验证可能花费较长时间，期间训练更新暂停，GPU 利用率与训练阶段可能不同。
 

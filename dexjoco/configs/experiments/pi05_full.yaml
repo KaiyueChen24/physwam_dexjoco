@@ -49,5 +49,5 @@ keep_period: 10000                      # [保存/保留] 长期保留编号为�
 validation_ratio: 0.1                   # [验证/划分] 每任务留出的完整 episode 比例；0 关闭，按数量向上取整且保留训练 episode。
 validation_seed: 42                     # [验证/随机性] episode 划分及验证噪声的固定种子，两种模型使用相同值可复用划分。
 validation_interval: 2000               # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
-validation_batch_size: 8                # [验证/批次] 所有 GPU 合计的验证 batch，须能被可见卡数整除。
-validation_max_batches: 50              # [验证/预算] null 遍历完整留出集；整数限制每任务验证批次数，结果会标注是否全量。
+validation_batch_size: 32               # [验证/GPU 批次] 全局 32，八卡每卡 4；独立于训练 batch。
+validation_max_batches: 12              # [验证/预算] 每任务最多 12 批，即 384 帧；null 才遍历全部留出帧。

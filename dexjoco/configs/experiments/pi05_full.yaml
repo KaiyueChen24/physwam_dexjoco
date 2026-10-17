@@ -16,11 +16,11 @@ max_token_len: 250                      # [模型/文本] 任务指令与离散�
 gpus: "0,1,2,3,4,5,6,7"                 # [GPU/可见卡] 正式训练使用八张 H100；--gpus 可覆盖。
 fsdp_devices: 8                         # [GPU/参数分片] 八卡组成一个 FSDP 分片组；须整除可见卡数。
 
-# 【数据 / data】
+# 【数据 / data】学校
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
 dataset_root: null                      # [数据/路径] null 使用任务组的数据根目录；--dataset-root 可覆盖。
 video_backend: pyav                     # [数据/视频] LeRobot 视频解码后端。
-
+先
 # 【归一化统计 / normalization】
 stats_samples: 50000                    # [归一化/抽样] 按任务混合分布有放回抽取的训练帧总数；单、双臂分别统计。
 stats_batch_size: 256                   # [归一化/CPU 批次] 每次累计的低维帧数；不解码视频，不是 GPU 训练 batch。
@@ -43,7 +43,7 @@ wandb_enabled: true                     # [日志/在线记录] 启用 W&B；启
 wandb_project: physwam_dexjoco          # [日志/项目] W&B 项目名；所属个人/团队由登录账号或 WANDB_ENTITY 指定。
 log_interval: 2000                      # [日志/频率] 训练指标的记录间隔，单位为训练步。
 save_interval: 2000                     # [保存/频率] checkpoint 保存间隔；训练结束还会保存最终状态。
-keep_period: 10000                      # [保存/保留] 长期保留编号为此值倍数的 checkpoint，此外保留最新一个。
+keep_period: 2000                       # [保存/保留] 长期保留编号为此值倍数的 checkpoint，此外保留最新一个。
 
 # 【验证集 / validation：只计算 loss，不参与训练】
 validation_ratio: 0.1                   # [验证/划分] 每任务留出的完整 episode 比例；0 关闭，按数量向上取整且保留训练 episode。

@@ -101,3 +101,44 @@ def test_unresponsive_worker_has_bounded_wait(evaluator):
     event.set()
     with pytest.raises(TimeoutError, match="pending inference"):
         evaluator._wait_for_inference(event, worker, timeout=0)
+
+
+_PARENT_RENDERER_SENTINEL = None
+
+
+def _probe_spawn_worker(obs_queue, action_queue, stop_event, port, inferencing_event, seed, host, metrics):
+    # The parent changes this global after imports, like a live native context.
+    # A fork child inherits it; a spawn child imports a fresh module instead.
+    for episode in range(2):
+        obs = obs_queue.get(timeout=10)
+        inferencing_event.clear()
+        action_queue.put((obs["episode"], obs["image"], _PARENT_RENDERER_SENTINEL is None))
+    stop_event.wait(10)
+
+
+def test_inference_worker_isolates_parent_resources_and_keeps_ipc_across_episodes(evaluator, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_PARENT_RENDERER_SENTINEL", object())
+    monkeypatch.setattr(evaluator, "inference_process", _probe_spawn_worker)
+    observations, actions, stop, pending, worker = evaluator._create_inference_worker(8000, 0, "127.0.0.1")
+    try:
+        worker.start()
+        for episode in range(2):
+            image = np.full((224, 224, 3), episode, dtype=np.uint8)
+            pending.set()
+            observations.put({"episode": episode, "image": image})
+            received_episode, received_image, isolated = actions.get(timeout=10)
+            assert received_episode == episode
+            np.testing.assert_array_equal(received_image, image)
+            assert isolated, "worker inherited parent renderer state via fork"
+            assert not pending.is_set(), "spawn worker event must be shared with parent"
+        stop.set()
+        worker.join(timeout=10)
+        assert worker.exitcode == 0
+    finally:
+        stop.set()
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=2)
+        for queue in (observations, actions):
+            queue.cancel_join_thread()
+            queue.close()

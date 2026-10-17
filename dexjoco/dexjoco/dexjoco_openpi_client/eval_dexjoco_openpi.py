@@ -137,6 +137,20 @@ def inference_process(
         inferencing_event.clear()
 
 
+def _create_inference_worker(port, seed, host, metrics_output=None):
+    """Do not fork a process that already owns MuJoCo/EGL renderer resources."""
+    context = mp.get_context("spawn")
+    obs_queue = context.Queue()
+    action_queue = context.Queue()
+    stop_event = context.Event()
+    inferencing_event = context.Event()
+    process = context.Process(
+        target=inference_process,
+        args=(obs_queue, action_queue, stop_event, port, inferencing_event, seed, host, metrics_output),
+    )
+    return obs_queue, action_queue, stop_event, inferencing_event, process
+
+
 def receive_actions(
     action_queue: mp.Queue,
     actions_buffer: deque,
@@ -350,16 +364,12 @@ def main(
     )
     env.start()
 
-    # Queues connect the control loop with the asynchronous inference worker.
-    obs_queue = mp.Queue()
-    action_queue = mp.Queue()
-    stop_event = mp.Event()
-    inferencing_event = mp.Event()
-
-    inference_proc = mp.Process(
-        target=inference_process,
-        args=(obs_queue, action_queue, stop_event, port, inferencing_event, seed, host, metrics_output),
+    # All IPC objects must use the same spawn context as the worker. In
+    # particular, never inherit the environment's EGL context via Linux fork.
+    obs_queue, action_queue, stop_event, inferencing_event, inference_proc = _create_inference_worker(
+        port, seed, host, metrics_output
     )
+    print("Inference worker start method: spawn (isolated from MuJoCo/EGL)", flush=True)
     video_writers = None
 
     try:

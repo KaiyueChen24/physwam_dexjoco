@@ -347,6 +347,8 @@ python scripts/summarize_results.py \
 评测核对服务器的任务组、run、checkpoint 与 action horizon。当前评测器需要 horizon 30。
 
 首次推理可能触发数分钟的 JAX 编译与 cuDNN 算法选择；`slow_operation_alarm` 本身不表示失败。服务端将推理放在线程中串行执行，保持 WebSocket 心跳响应；评测器每回合等待首批动作后才推进仿真（默认最多等待 300 秒），避免编译时间耗尽回合。回合内仍沿用异步重规划与缺动作时保持姿态的逻辑。推理子进程退出会使评测明确失败，不再无限等待。更新这部分代码后须重启策略服务和评测进程；重跑使用新的 `evaluation-name`，以免跳过已有结果。
+推理子进程及其队列、事件统一使用 `spawn` 上下文，防止 Linux 默认 `fork` 继承已经创建的 MuJoCo/EGL 渲染器资源。日志应出现 `Inference worker start method: spawn`。若仍发生 `SIGABRT`，在评测终端设置 `PYTHONFAULTHANDLER=1` 和 `PYTHONUNBUFFERED=1` 后重试，保留原始调用栈；渲染层崩溃不能计作模型的正常失败回合。
+
 任务的环境、相机和 prompt 使用训练时保存的任务组配置。
 
 结果包含逐任务视频、日志、成功次数、`latency.jsonl`，以及 JSON/CSV 汇总。

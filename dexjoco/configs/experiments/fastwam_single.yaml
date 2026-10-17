@@ -37,7 +37,7 @@ gradient_checkpointing: true           # [GPU/显存] 启用梯度检查点，�
 # 【日志与模型保存 / logging & checkpoint】
 save_every: 1000                       # [保存/频率] 官方训练器保存权重/训练状态的更新步间隔。
 log_every: 10                          # [日志/频率] 官方训练器记录指标的更新步间隔。
-wandb_enabled: false                   # [日志/在线记录] 是否启用 W&B；训练控制台输出仍写入本地日志。
+wandb_enabled: True                    # [日志/在线记录] 是否启用 W&B；训练控制台输出仍写入本地日志。
 
 # 【部署推理与闭环评测 / inference & eval】
 execute_steps: 8                       # [评测/执行] 每次预测后最多执行前 8 步再观察；eval --execute-steps 可覆盖。

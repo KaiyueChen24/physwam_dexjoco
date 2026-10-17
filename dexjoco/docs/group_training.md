@@ -47,10 +47,11 @@ cd dexjoco
 - `episodes: null` 将全部示范作为划分候选；若提供 ID 列表，先限制候选，再按 validation_ratio 划分。验证关闭时这些候选全部用于训练。
 - 当前默认每任务留出 10% 完整 episode，仅计算 loss；训练与验证不交叉，归一化仅使用划分后的训练 episode。
 - `pi05_smoke.yaml`：四卡 FSDP、真实数据与 base 权重、全量微调、全局 batch 4、20 步短跑。
-- `pi05_full.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；CPU 加载进程 32。
+- `pi05_single.yaml`：默认单臂全部六任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；CPU 加载进程 32。
   多任务步数不是论文复现保证，请根据验证成绩和训练预算调整。
-- 两份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
-- `--group`、`--gpus` 覆盖 YAML；正式配置默认 `single_arm`、`0,1,2,3,4,5,6,7`，smoke 仍使用四卡。组内六个任务各以 1/6 概率采样，共享一个模型。
+- `pi05_dual.yaml`：默认双臂全部五任务联合训练，八卡 FSDP、全量微调、全局 batch 256、100,000 步；状态 46 维、模型动作 44 维，加载 `pi05_base_action_dim_44/params`。
+- 三份配方均显式设置 `finetune_mode: full`，使用标准 `gemma_2b` 与 `gemma_300m`，视觉、语言、动作模块全部更新。
+- `--group`、`--gpus` 覆盖 YAML；`pi05_single.yaml` 默认 `single_arm`，`pi05_dual.yaml` 默认 `dual_arm`，两者均使用 `0,1,2,3,4,5,6,7`，smoke 仍使用四卡。单臂六任务各以 1/6 概率采样，双臂五任务各以 1/5 概率采样，每组共享一个模型。
 - 全局 batch 必须能被可见 GPU 数整除；`fsdp_devices` 必须整除可见 GPU 数。正式默认 8 表示一个八卡分片组；1 表示不分片的数据并行。
 - 当前任务均衡采样支持单进程 JAX 的单机多卡，不支持多节点或 PyTorch DDP。
 - 各任务先通过自己的 LeRobot reader 构造动作 chunk，再统一相机字段；chunk 不跨 episode。
@@ -60,7 +61,7 @@ cd dexjoco
 
 ## 留出验证集（仅计算 loss）
 
-`pi05_full.yaml` 和 `pi05_smoke.yaml` 已接入以下参数：
+`pi05_single.yaml`、`pi05_dual.yaml` 和 `pi05_smoke.yaml` 已接入以下参数：
 
 ```yaml
 # 【验证 / validation：只计算 loss，不反向传播】
@@ -128,7 +129,7 @@ python scripts/smoke_train_pi05.py --group dual_arm \
 结果位于 `runs/<name>/smoke_result.json`、`validation_loss.jsonl` 和 `train.log`。
 专用 smoke 在第 20、21 步保存；`save_interval: 10` 仅在通过 train_pi05_group.py 使用该配置时生效。
 `validation_max_batches: 2` 只检查每任务最多两批（当前全局 batch 4，即最多 8 帧），结果注明是否全量；512 帧的归一化估计也仅供短跑。
-正式训练请用独立 run-name 和 pi05_full.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
+正式训练请用独立 run-name 和 pi05_single.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
 
 ## 服务器准备与训练
 
@@ -162,10 +163,16 @@ python scripts/train_pi05_group.py --run-name single_full
 
 ```bash
 python scripts/prepare_group_data.py --group dual_arm
-python scripts/train_pi05_group.py --group dual_arm --run-name dual_full
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_dual.yaml --dry-run
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_dual.yaml \
+  --stage prepare --run-name dual_full
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_dual.yaml \
+  --run-name dual_full
 ```
 
-恢复完整训练：
+双臂配置从 base 权重开始训练一个共享 policy，不加载单臂已经微调的 checkpoint。恢复双臂实验时也须指定 `--experiment configs/experiments/pi05_dual.yaml`，并使用原 run-name 加 `--resume`。
+
+恢复单臂完整训练：
 
 ```bash
 python scripts/train_pi05_group.py --run-name single_full --resume
@@ -202,7 +209,7 @@ mkdir -p logs "runs/$RUN"
 export WANDB_DIR="$PWD/runs/$RUN"
 set -o pipefail
 python -u scripts/train_pi05_group.py \
-  --experiment configs/experiments/pi05_full.yaml \
+  --experiment configs/experiments/pi05_single.yaml \
   --group single_arm --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
   --batch-size 256 --num-workers 32 --run-name "$RUN" \
   2>&1 | tee "logs/$RUN.launch.log"
@@ -217,7 +224,7 @@ python -u scripts/train_pi05_group.py \
 
 ## 数据加载与 GPU 空闲排查
 
-`pi05_full.yaml` 的 `num_workers` 设为 32，控制 CPU 视频解码、图像变换和组批的进程数。
+`pi05_single.yaml` 的 `num_workers` 设为 32，控制 CPU 视频解码、图像变换和组批的进程数。
 这只是起点，不保证增加进程数一定更快；进程过多也可能造成 CPU、内存和共享存储争用。
 保持待测 run 的 batch、模型和数据不变，先对 8/16/32 做对照。查看当前进程可用的 CPU 逻辑核数：
 
@@ -244,7 +251,7 @@ done
 同步本次代码后，可以在已有 checkpoint 的原 run 恢复时只调整 workers，无需从 base 重训：
 
 ```bash
-python scripts/train_pi05_group.py --experiment configs/experiments/pi05_full.yaml \
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_single.yaml \
   --run-name "$RUN" --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
   --batch-size 256 --num-workers 32 --resume
 ```
@@ -267,7 +274,7 @@ W&B 与控制台的性能指标随 `log_interval` 输出：
 
 ## W&B 登录、GPU 与 loss 监控
 
-正式配方 `pi05_full.yaml` 默认 `wandb_enabled: true`、`wandb_project: physwam_dexjoco`。
+正式配方 `pi05_single.yaml` 默认 `wandb_enabled: true`、`wandb_project: physwam_dexjoco`。
 `wandb_project` 由分组入口传入 OpenPI；未提供该字段的历史配方仍使用 `openpi` 项目。
 所属个人/团队沿用登录账号，也可在终端用 `WANDB_ENTITY` 指定有写权限的团队。
 专用 smoke 脚本用于本地链路检查，不调用正式训练器的 W&B 初始化。

@@ -16,7 +16,7 @@ max_token_len: 250                      # [模型/文本] 任务指令与离散�
 gpus: "0,1,2,3,4,5,6,7"                 # [GPU/可见卡] 正式训练使用八张 H100；--gpus 可覆盖。
 fsdp_devices: 8                         # [GPU/参数分片] 八卡组成一个 FSDP 分片组；须整除可见卡数。
 
-# 【数据 / data】学校
+# 【数据 / data】
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
 dataset_root: null                      # [数据/路径] null 使用任务组的数据根目录；--dataset-root 可覆盖。
 video_backend: pyav                     # [数据/视频] LeRobot 视频解码后端。

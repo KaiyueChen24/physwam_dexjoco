@@ -71,7 +71,7 @@ def get_finetune_mode(experiment):
     return mode
 
 
-def training_parser(description, default_experiment="pi05_full"):
+def training_parser(description, default_experiment="pi05_single"):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--group", choices=("single_arm", "dual_arm"), help='[任务选择] 覆盖实验 YAML 的任务组；组内全部任务联合训练。')
     parser.add_argument("--experiment", default=f"configs/experiments/{default_experiment}.yaml", help='[配置与实验] 实验 YAML 路径；相对路径以 DexJoCo 仓库根目录为准。')

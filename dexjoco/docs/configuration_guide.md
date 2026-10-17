@@ -21,7 +21,8 @@
 
 主要配置已逐字段标注：
 
-- `configs/experiments/pi05_full.yaml`：默认四卡 FSDP，单臂六任务联合全量微调 π0.5。
+- `configs/experiments/pi05_single.yaml`：默认八卡 FSDP，单臂六任务联合全量微调 π0.5；全局 batch 256。
+- `configs/experiments/pi05_dual.yaml`：默认八卡 FSDP，双臂五任务联合全量微调 π0.5；全局 batch 256，模型动作 44 维，使用双臂 base 权重。
 - `configs/experiments/pi05_smoke.yaml`：相同全量更新范围与四卡 FSDP，真实数据 20 步短跑。
 - `configs/experiments/fastwam_single.yaml`：8 张 H100（GPU 0–7），单臂全部六任务联合训练；每卡 batch 16、累积 1，全局 batch 128，30,000 步首轮预算。
 - FastWAM 实验 YAML 可选 `wandb_name`：设置 W&B 显示名；`null` 跟随 `--run-name`，省略则继承基础配置名称。
@@ -160,7 +161,7 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 
 | 入口 | 关键参数与用途 |
 |---|---|
-| `scripts/train_pi05_group.py` | 默认 pi05_full.yaml；任务组与 GPU 默认读取配方；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
+| `scripts/train_pi05_group.py` | 默认 pi05_single.yaml；任务组与 GPU 默认读取配方；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
 | `scripts/smoke_train_pi05.py` | 默认四卡全量微调真实数据 pi05_smoke；脚本自身测试恢复，不接受 --resume |
 | `scripts/train_fastwam_group.py` | 默认 fastwam_single.yaml；--experiment 可选 fastwam_smoke.yaml；任务与 GPU 默认读配方；`--stage prepare/inspect/initialize/train`；`--mode joint/per_task`；`--resume` 必须指向完整训练状态目录 |
 | `scripts/prepare_group_data.py` | `--group`、`--data-only`、`--weights-only`、`--data-revision`、`--model-revision`；权重下载针对 π0.5 |

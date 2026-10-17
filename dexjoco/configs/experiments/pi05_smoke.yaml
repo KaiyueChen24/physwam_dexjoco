@@ -1,7 +1,7 @@
 # π0.5 四卡全量微调短跑：由 scripts/smoke_train_pi05.py 默认读取。
-# 与 pi05_full.yaml 使用相同模型和更新范围，验证更新、验证 loss、checkpoint 保存和恢复。
+# 与 pi05_single.yaml 使用相同模型和更新范围，验证更新、验证 loss、checkpoint 保存和恢复。
 # 启动示例：python scripts/smoke_train_pi05.py --run-name pi05_single_full_smoke
-# 使用真实 LeRobot 示范；正式长跑使用 pi05_full.yaml。
+# 使用真实 LeRobot 示范；正式长跑使用 pi05_single.yaml。
 
 # 【配置格式 / config】
 schema_version: 1                      # [配置格式] 配置结构版本，目前仅接受 1。

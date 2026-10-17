@@ -14,26 +14,42 @@ from group_common import (build_train_config, get_finetune_mode, load_group, rea
                           resolve, training_parser, write_run)
 
 
-@pytest.mark.parametrize("experiment,batch,steps,gpus,fsdp", [
-    ("pi05_full", 256, 100000, "0,1,2,3,4,5,6,7", 8),
-    ("pi05_smoke", 4, 20, "0,1,2,3", 4),
+@pytest.mark.parametrize("experiment,group,count,batch,steps,gpus,fsdp", [
+    ("pi05_single", "single_arm", 6, 256, 100000, "0,1,2,3,4,5,6,7", 8),
+    ("pi05_dual", "dual_arm", 5, 256, 100000, "0,1,2,3,4,5,6,7", 8),
+    ("pi05_smoke", "single_arm", 6, 4, 20, "0,1,2,3", 4),
 ])
-def test_profiles_select_full_single_arm_group_and_expected_gpu_layout(experiment, batch, steps, gpus, fsdp, monkeypatch):
+def test_profiles_select_all_group_tasks_and_expected_gpu_layout(experiment, group, count, batch, steps, gpus, fsdp, monkeypatch):
     # resolve changes CUDA visibility, so restore the environment after each test.
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
     monkeypatch.setenv("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     # Budget values are explicit overrides so users can tune YAML without breaking architecture checks.
     resolved = resolve(training_parser("test", experiment).parse_args([
         "--batch-size", str(batch), "--steps", str(steps)]))
-    assert resolved["group"]["name"] == "single_arm"
-    assert resolved["group"]["tasks"] == load_group("single_arm")["tasks"]
-    assert len(resolved["group"]["tasks"]) == 6
+    assert resolved["group"]["name"] == group
+    assert resolved["group"]["tasks"] == load_group(group)["tasks"]
+    assert len(resolved["group"]["tasks"]) == count
     assert resolved["gpus"] == gpus
     assert resolved["experiment"]["finetune_mode"] == "full"
     assert resolved["experiment"]["fsdp_devices"] == fsdp
     assert resolved["experiment"]["validation_batch_size"] % len(gpus.split(",")) == 0
     assert resolved["experiment"]["batch_size"] == batch
     assert resolved["experiment"]["num_train_steps"] == steps
+
+
+def test_dual_profile_builds_44d_model_with_dual_base_and_all_five_tasks(monkeypatch):
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    resolved = resolve(training_parser("test", "pi05_dual").parse_args([]))
+    config = build_train_config(resolved)
+    assert config.model.pi05 and config.model.action_dim == 44
+    assert config.policy_metadata["robot_type"] == "dual_arm"
+    assert config.policy_metadata["tasks"] == [task["name"] for task in load_group("dual_arm")["tasks"]]
+    assert Path(config.weight_loader.params_path) == ROOT / "checkpoints/pi05_base_action_dim_44/params"
+    assert resolved["group"]["state_dim"] == 46
+    assert config.name == "pi05_dual_arm_multitask"
+    assert config.model.paligemma_variant == "gemma_2b"
+    assert config.model.action_expert_variant == "gemma_300m"
 
 
 def test_cli_can_override_profile_group_and_gpu_layout(monkeypatch):

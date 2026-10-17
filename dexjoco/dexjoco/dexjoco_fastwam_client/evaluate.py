@@ -58,6 +58,8 @@ def main():
     parser.add_argument("--execute-steps", type=int, default=8, help='[闭环评测] 每次预测后执行多少步再观察；必须不大于 action_horizon。')
     parser.add_argument("--max-steps", type=int, default=3000, help='[闭环评测] 每个回合最多执行的环境动作步数，不是训练更新步数。')
     parser.add_argument("--rand-full", action="store_true", help='[闭环评测] 启用环境的完整视觉/场景随机化；不改变训练数据。')
+    parser.add_argument("--no-video", action="store_true",
+                        help="[评测/录制] 关闭 MP4 录制；保留策略所需相机图像和指标输出。")
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text())
     expected = json.loads(Path(args.metadata).read_text())
@@ -67,7 +69,8 @@ def main():
     os.environ.setdefault("MUJOCO_GL", "egl")
     from openpi_client import msgpack_numpy
     from websockets.sync.client import connect
-    import imageio.v2 as imageio
+    if not args.no_video:
+        import imageio.v2 as imageio
     from .env import DexJoCoFastWAMEnv
 
     target = Path(args.output)
@@ -93,7 +96,7 @@ def main():
             for episode in range(args.episodes):
                 writers = {key: imageio.get_writer(target / f"episode_{episode:03d}_{key}.mp4",
                                                  fps=actual["control_hz"])
-                           for key in config["camera_mapping"].values()}
+                           for key in config["camera_mapping"].values()} if not args.no_video else {}
                 def record():
                     for key, frame in env.get_raw_images().items():
                         writers[key].append_data(frame)
@@ -116,7 +119,8 @@ def main():
                     result = execute_episode(env, infer, task=config["env_name"], episode_id=episode,
                                              horizon=horizon, action_dim=actual["action_dim"],
                                              execute_steps=args.execute_steps, max_steps=args.max_steps,
-                                             on_step=record, on_infer=log_infer, seed=args.seed)
+                                             on_step=None if args.no_video else record,
+                                             on_infer=log_infer, seed=args.seed)
                 finally:
                     for writer in writers.values():
                         writer.close()

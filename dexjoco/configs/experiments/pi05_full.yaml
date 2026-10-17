@@ -1,4 +1,4 @@
-# π0.5 单臂全部六任务全量微调：由 scripts/train_group.py 默认读取。
+# π0.5 单臂全部六任务全量微调：由 scripts/train_pi05_group.py 默认读取。
 # 优先级：已支持的命令行选项 > 本文件；任务、相机和维度见 configs/task_groups/。
 # 部署（serve）、闭环评测（eval）的命令行参数见 docs/configuration_guide.md。
 
@@ -20,7 +20,7 @@ fsdp_devices: 8                         # [GPU/参数分片] 八卡组成一个 
 sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
 dataset_root: null                      # [数据/路径] null 使用任务组的数据根目录；--dataset-root 可覆盖。
 video_backend: pyav                     # [数据/视频] LeRobot 视频解码后端。
-先
+
 # 【归一化统计 / normalization】
 stats_samples: 50000                    # [归一化/抽样] 按任务混合分布有放回抽取的训练帧总数；单、双臂分别统计。
 stats_batch_size: 256                   # [归一化/CPU 批次] 每次累计的低维帧数；不解码视频，不是 GPU 训练 batch。
@@ -32,7 +32,7 @@ checkpoint_paths:                       # [初始化/路径] 按 --group 选择�
 
 # 【训练与优化 / train】
 seed: 42                                # [训练/随机性] 模型、数据采样与统计使用的随机种子。
-batch_size: 256                          # [训练/批次] 全局 batch 256，八卡每卡 32；10 万步共抽取 2560 万条样本。
+batch_size: 256                         # [训练/批次] 全局 batch 256，八卡每卡 32；10 万步共抽取 2560 万条样本。
 num_workers: 32                         # [数据/CPU] 视频解码与预处理进程数；须结合可用 CPU 与实测吞吐调整。
 num_train_steps: 100000                 # [训练/预算] 参数更新总步数，不是 epoch；本配方单、双臂均用此值。
 learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前 Python 将衰减终点设为相同值。

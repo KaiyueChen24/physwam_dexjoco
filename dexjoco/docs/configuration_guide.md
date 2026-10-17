@@ -25,6 +25,7 @@
 - `configs/experiments/pi05_smoke.yaml`：相同全量更新范围与四卡 FSDP，真实数据 20 步短跑。
 - `configs/experiments/fastwam_single.yaml`：4 张 H100，默认 water_plant 单任务，20,000 步正式起始配方。
 - `configs/experiments/fastwam_smoke.yaml`：相同模型与数据契约，20 步真实数据短跑，每 10 步保存/验证。
+- `configs/experiments/fastwam_dual.yaml`：四卡、双臂全部 5 个任务联合训练一个 policy；每卡 batch=1、累积 8 次，全局 batch=32，启用 W&B。
 - `configs/task_groups/{single_arm,dual_arm}.yaml`：两组共享的任务与数据契约。
 - `configs/{rand_obj,rand_full,multi_task,ipad_reasoning}/*.yaml`：仿真环境与语言指令。
 - `openpi/config.yaml`：原始 OpenPI/DexJoCo 配置入口，不替代分组实验 YAML。
@@ -128,9 +129,9 @@ python3 dexjoco/scripts/setup_mihomo.py --stop
 两份 π0.5 配方的 `group`、`gpus` 默认 `single_arm`、字符串 "0,1,2,3"，可由 --group、--gpus 覆盖。
 任务组中的全部任务联合训练；`finetune_mode: full` 全量更新，`lora` 使用原 LoRA 结构。
 FastWAM：支持的命令行覆盖项优先于实验 YAML，实验配置再覆盖上游训练和模型模板；采样方式读取实验 YAML。
-`group`、`tasks`、`gpus` 也由启动器读取；两份配方默认 single_arm、[water_plant]、字符串 "0,1,2,3"。
+`group`、`tasks`、`gpus` 也由启动器读取；单臂配方默认 single_arm、[water_plant]，双臂配方为 dual_arm、null（全部任务）；均默认四卡 "0,1,2,3"。
 `tasks: null` 表示使用整个任务组；命令行 --group、--tasks、--gpus 分别覆盖。
-四卡配方每卡 batch=1、梯度累积=1，因此有效全局 batch=4。dry-run 的 framework.launch 显示实际卡数与 batch。
+有效全局 batch=每卡 batch×GPU 数×梯度累积次数；以各实验 YAML 为准。dry-run 的 framework.launch 显示实际卡数与全局 batch。
 初始化骨干脚本只在首个可见 GPU 上运行；四个训练进程由 train 阶段的 Accelerate 启动。
 FastWAM 适配器还会显式设置部分字段，例如 `eval_every=0`（生成式视频评测关闭；留出 loss 验证使用独立路径）。这些固定设置在构造器中标有中文类别。
 
@@ -158,7 +159,7 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 
 | 入口 | 关键参数与用途 |
 |---|---|
-| `scripts/train_group.py` | 默认 pi05_full.yaml；任务组与 GPU 默认读取配方；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
+| `scripts/train_pi05_group.py` | 默认 pi05_full.yaml；任务组与 GPU 默认读取配方；`--stage prepare/stats/train`；`--resume` 恢复最近状态 |
 | `scripts/smoke_train_pi05.py` | 默认四卡全量微调真实数据 pi05_smoke；脚本自身测试恢复，不接受 --resume |
 | `scripts/train_fastwam_group.py` | 默认 fastwam_single.yaml；--experiment 可选 fastwam_smoke.yaml；任务与 GPU 默认读配方；`--stage prepare/inspect/initialize/train`；`--mode joint/per_task`；`--resume` 必须指向完整训练状态目录 |
 | `scripts/prepare_group_data.py` | `--group`、`--data-only`、`--weights-only`、`--data-revision`、`--model-revision`；权重下载针对 π0.5 |
@@ -184,11 +185,13 @@ FastWAM 的 `fastwam_config.yaml` 包含传给官方训练器的配置，并保�
 | `--seeds` | 评测/随机性 | 环境种子列表；π0.5 默认 0、1、2，FastWAM 默认 0；与训练 seed 独立 |
 | `--episodes` | 评测/预算 | 每个任务、每个 seed 的回合数，默认 50 |
 | `--evaluation-name` | 评测/保存 | 结果子目录名，默认 rand_obj；名称不会自动开启随机化 |
+| `--gl-backend` | 评测/渲染 | 两个批量入口均支持：默认 egl 使用 GPU，osmesa 使用 CPU 软件渲染以隔离 EGL 故障；切换后端须换 evaluation-name |
 | `--timeout` | 评测/超时 | 每个任务与 seed 组合的进程超时，π0.5 默认 7200 秒、FastWAM 默认 86400 秒 |
 | `--retry-failed` | 评测/重试 | 重跑已有失败 job；已完成 job 继续跳过 |
 | `--dry-run` | 评测/计划 | 只打印任务计划，不连接服务或运行仿真 |
 | `--max-steps` | 评测/预算 | FastWAM 每个回合的环境步数上限，默认 3000；不是训练更新数 |
 | `--execute-steps` | 评测/重规划 | FastWAM 每次最多执行的预测动作步数，省略时读取 run 的 execute_steps |
+| `--no-video` | 评测/录制 | 仅 FastWAM：关闭 MP4 录制，仍渲染策略相机观测并保存回合与延迟指标；默认录制；切换须换 evaluation-name |
 | `--rand-full` | 评测/随机化 | FastWAM 批量入口开启完整视觉随机化；不改变训练数据 |
 
 π0.5 批量入口当前没有 `--rand-full`、`--randomize-dynamics` 或 `--replan-ratio` 覆盖项。

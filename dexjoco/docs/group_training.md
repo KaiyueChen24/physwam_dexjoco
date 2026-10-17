@@ -126,7 +126,7 @@ python scripts/smoke_train_pi05.py --group dual_arm \
 
 脚本检查各任务数据和图像、训练指标有限、参数更新、留出集 loss、保存、恢复状态完全一致以及恢复后继续一步。
 结果位于 `runs/<name>/smoke_result.json`、`validation_loss.jsonl` 和 `train.log`。
-专用 smoke 在第 20、21 步保存；`save_interval: 10` 仅在通过 train_group.py 使用该配置时生效。
+专用 smoke 在第 20、21 步保存；`save_interval: 10` 仅在通过 train_pi05_group.py 使用该配置时生效。
 `validation_max_batches: 2` 只检查每任务最多两批（当前全局 batch 4，即最多 8 帧），结果注明是否全量；512 帧的归一化估计也仅供短跑。
 正式训练请用独立 run-name 和 pi05_full.yaml，重新计算正式统计；短跑不是任务收敛或成功率保证。
 
@@ -144,16 +144,16 @@ cd ~/physwam/dexjoco
 python scripts/prepare_group_data.py --group single_arm
 
 # 确认：finetune_mode=full、六个单臂任务、gpus=0,1,2,3,4,5,6,7、fsdp_devices=8
-python scripts/train_group.py --dry-run
+python scripts/train_pi05_group.py --dry-run
 
 # 检查真实数据、相机解码及指令
-python scripts/train_group.py --stage prepare --run-name single_full
+python scripts/train_pi05_group.py --stage prepare --run-name single_full
 
 # 分组计算统计（train 阶段在统计不存在时也会自动计算）
-python scripts/train_group.py --stage stats --run-name single_full
+python scripts/train_pi05_group.py --stage stats --run-name single_full
 
 # 正式全量微调：默认八卡 FSDP、全局 batch 256（每卡 32 条样本）
-python scripts/train_group.py --run-name single_full
+python scripts/train_pi05_group.py --run-name single_full
 ```
 
 这份正式配方占用八张卡；启动前确认卡均可用，并已获得对应资源。若指定其他卡号，prepare/stats/train 应保持同一配置。
@@ -162,13 +162,13 @@ python scripts/train_group.py --run-name single_full
 
 ```bash
 python scripts/prepare_group_data.py --group dual_arm
-python scripts/train_group.py --group dual_arm --run-name dual_full
+python scripts/train_pi05_group.py --group dual_arm --run-name dual_full
 ```
 
 恢复完整训练：
 
 ```bash
-python scripts/train_group.py --run-name single_full --resume
+python scripts/train_pi05_group.py --run-name single_full --resume
 ```
 
 运行记录包括 `resolved_config.yaml`、`data_manifest.json`、`environment.txt`、`train.log`。
@@ -201,7 +201,7 @@ RUN="pi05_single_full_8gpu_$(date +%Y%m%d_%H%M%S)"
 mkdir -p logs "runs/$RUN"
 export WANDB_DIR="$PWD/runs/$RUN"
 set -o pipefail
-python -u scripts/train_group.py \
+python -u scripts/train_pi05_group.py \
   --experiment configs/experiments/pi05_full.yaml \
   --group single_arm --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
   --batch-size 256 --num-workers 32 --run-name "$RUN" \
@@ -244,7 +244,7 @@ done
 同步本次代码后，可以在已有 checkpoint 的原 run 恢复时只调整 workers，无需从 base 重训：
 
 ```bash
-python scripts/train_group.py --experiment configs/experiments/pi05_full.yaml \
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_full.yaml \
   --run-name "$RUN" --gpus 0,1,2,3,4,5,6,7 --fsdp-devices 8 \
   --batch-size 256 --num-workers 32 --resume
 ```
@@ -376,4 +376,4 @@ ROS 的 pytest 自动插件可能与 Conda Python 不兼容，因此关闭无关
 
 FastWAM 使用同一任务组和独立训练／推理入口，单臂动作直接使用 22 维。
 完整框架、环境与命令见 [FastWAM 接入说明](fastwam_integration.md)。
-本页的 train_group.py、serve_group.py、evaluate_group.py 继续专用于 π0.5。
+本页的 train_pi05_group.py、serve_group.py、evaluate_group.py 继续专用于 π0.5。

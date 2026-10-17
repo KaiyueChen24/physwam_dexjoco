@@ -12,6 +12,7 @@ import uuid
 import yaml
 
 from fastwam_common import ROOT, add_fastwam
+from evaluate_group import rendering_environment
 
 
 def main():
@@ -26,6 +27,10 @@ def main():
     parser.add_argument("--max-steps", type=int, default=3000, help='[闭环评测] 每个回合最多执行的环境动作步数，不是训练更新步数。')
     parser.add_argument("--execute-steps", type=int, help='[闭环评测] 每次预测后执行多少步再观察；必须不大于 action_horizon。')
     parser.add_argument("--evaluation-name", default="rand_obj", help='[闭环评测] 本次评测结果子目录名；仅命名，不会自动切换随机化。')
+    parser.add_argument("--gl-backend", choices=("egl", "osmesa"), default="egl",
+                        help="[评测/渲染] egl 使用 GPU；osmesa 使用 CPU 软件渲染，供 EGL 故障诊断。")
+    parser.add_argument("--no-video", action="store_true",
+                        help="[评测/录制] 关闭 MP4 录制以诊断渲染故障；仍渲染策略观测并保存指标。")
     parser.add_argument("--rand-full", action="store_true", help='[闭环评测] 启用环境的完整视觉/场景随机化；不改变训练数据。')
     parser.add_argument("--timeout", type=float, default=86400, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
@@ -47,7 +52,8 @@ def main():
     tasks = [t for t in group["tasks"] if not args.tasks or t["name"] in args.tasks]
     jobs = [{"task": t["name"], "seed": seed, "episodes": args.episodes} for t in tasks for seed in args.seeds]
     if args.dry_run:
-        print(json.dumps({"jobs": jobs, "execute_steps": steps, "action_horizon": exp["action_horizon"]}, indent=2))
+        print(json.dumps({"jobs": jobs, "execute_steps": steps, "action_horizon": exp["action_horizon"],
+                          "gl_backend": args.gl_backend, "record_video": not args.no_video}, indent=2))
         return
     from openpi_client import msgpack_numpy
     from websockets.sync.client import connect
@@ -61,10 +67,15 @@ def main():
     destination = run_dir / "evaluation" / args.evaluation_name
     destination.mkdir(parents=True, exist_ok=True)
     plan = {"group": group["name"], "run_name": config["framework"]["run_name"], "server": metadata,
-            "jobs": jobs, "execute_steps": steps, "max_steps": args.max_steps, "rand_full": args.rand_full}
+            "jobs": jobs, "execute_steps": steps, "max_steps": args.max_steps, "rand_full": args.rand_full,
+            "gl_backend": args.gl_backend, "record_video": not args.no_video}
     plan_path = destination / "plan.json"
-    if plan_path.exists() and json.loads(plan_path.read_text()) != plan:
-        raise ValueError("Plan/checkpoint/settings changed; use a new evaluation-name")
+    if plan_path.exists():
+        old_plan = json.loads(plan_path.read_text())
+        old_plan.setdefault("gl_backend", "egl")  # Legacy FastWAM evaluations always forced EGL.
+        old_plan.setdefault("record_video", True)  # Legacy evaluations always recorded MP4s.
+        if old_plan != plan:
+            raise ValueError("Plan/checkpoint/settings/rendering backend changed; use a new evaluation-name")
     plan_path.write_text(json.dumps(plan, indent=2))
     failures = []
     for job in jobs:
@@ -89,9 +100,13 @@ def main():
                    "--episodes", str(args.episodes), "--max-steps", str(args.max_steps), "--execute-steps", str(steps)]
         if args.rand_full:
             command.append("--rand-full")
-        env = dict(os.environ, MUJOCO_GL="egl")
+        if args.no_video:
+            command.append("--no-video")
+        env = rendering_environment(args.gl_backend)
         env["PYTHONPATH"] = str(ROOT / "dexjoco") + os.pathsep + env.get("PYTHONPATH", "")
-        result = {**job, "checkpoint": metadata["checkpoint"], "status": "failed", "command": command}
+        result = {**job, "checkpoint": metadata["checkpoint"], "status": "failed", "command": command,
+                  "gl_backend": args.gl_backend, "record_video": not args.no_video}
+        print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)
         try:
             with (attempt / "eval.log").open("w") as stream:
                 process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=stream,
@@ -114,6 +129,7 @@ def main():
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
             result["error"] = str(exc)
             failures.append(job)
+            print("Evaluation error:", exc, "log:", attempt / "eval.log", flush=True)
         result_path.write_text(json.dumps(result, indent=2))
         print(job, result["status"], flush=True)
     if failures:

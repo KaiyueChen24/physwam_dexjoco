@@ -42,7 +42,7 @@ warmup_steps: 2                        # [训练/预热] 短跑前 2 步预热�
 # 【日志与模型保存 / logging & checkpoint】
 wandb_enabled: false                   # [日志/在线记录] 关闭 W&B 上传，仍保存 train.log 和 smoke_result.json。
 log_interval: 1                        # [日志/频率] 每步记录；专用 smoke 脚本固定每步打印。
-save_interval: 10                      # [保存/频率] 通用 train_group 入口每 10 步保存；专用 smoke 在恢复前后保存。
+save_interval: 10                      # [保存/频率] 通用 train_pi05_group 入口每 10 步保存；专用 smoke 在恢复前后保存。
 keep_period: null                      # [保存/保留] 不额外保留周期点；专用 smoke 使用其固定恢复验证策略。
 
 # 【验证集 / validation：只计算 loss，不参与训练】

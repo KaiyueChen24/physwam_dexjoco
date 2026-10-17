@@ -10,7 +10,7 @@ import yaml
 
 from group_common import (Tee, build_train_config, load_trainer, resolve, training_parser,
                           validate_gpu, write_run, resolve_training_split)
-from train_group import compute_stats, prepare_data
+from train_pi05_group import compute_stats, prepare_data
 
 
 def run_smoke(config, resolved):

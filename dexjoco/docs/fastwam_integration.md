@@ -84,15 +84,18 @@ source "$HOME/.config/physwam/fastwam-env.sh"
 
 ## 四卡配方与启动优先级
 
-两份配方均默认 `group: single_arm`、`tasks: [water_plant]`、`gpus: "0,1,2,3"`。
-每卡 batch=1、梯度累积=1，有效全局 batch=4。保持 BF16、梯度检查点、ZeRO-1，未启用 CPU offload。
+`fastwam_single.yaml` 与 `fastwam_smoke.yaml` 默认单臂 water_plant；
+`fastwam_dual.yaml` 默认双臂全部任务联合训练一个 policy。配方均默认四卡 "0,1,2,3"。
+有效全局 batch=每卡 batch×卡数×梯度累积次数；以实际 YAML 和 dry-run 输出为准。
+保持 BF16、梯度检查点、ZeRO-1，未启用 CPU offload。
 这是按每卡 80GB 的四张 H100 规划的起点，显存与吞吐仍需服务器实测。
 `--group`、`--tasks`、`--gpus` 可覆盖 YAML；`tasks: null` 才会选择整个任务组。
 
 | 配方 | 更新步数 | 保存间隔 | 验证间隔 | 每任务验证批次上限 |
 |---|---:|---:|---:|---:|
-| fastwam_single.yaml（默认） | 20000 | 1000 | 1000 | 全量 |
+| fastwam_single.yaml（默认） | 20000 | 1000 | 1000 | 50 个全局批次 |
 | fastwam_smoke.yaml | 20 | 10 | 10 | 2 个全局批次 |
+| fastwam_dual.yaml（双臂全部任务） | 20000 | 1000 | 1000 | 50 个全局批次 |
 
 smoke 使用同一个官方训练器与真实数据；没有 dummy 模型，也不是 π0.5 的 smoke 脚本。
 它不会自动检查参数差分或自动恢复后再多训一步。保存、验证的结果应结合日志检查，恢复需要显式命令。
@@ -191,7 +194,7 @@ validation_max_batches: null   # [验证/预算] null 遍历全量；整数限�
 
 ## 扩展到多任务
 
-两份配方默认是单任务。如需组内联合训练，可在自己的实验 YAML 中将 `tasks` 改为 null，
+单臂配方默认是单任务。如需组内联合训练，可在自己的实验 YAML 中将 `tasks` 改为 null，
 或者使用 `--tasks` 显式列出成员。例如双臂任务子集：
 
 ```bash
@@ -202,6 +205,38 @@ python scripts/train_fastwam_group.py --group dual_arm \
 
 正式训练的所有阶段重复相同任务与实验参数。`--mode per_task` 会为所选任务分别创建 run。
 任务均衡通过等长虚拟任务分区和官方 sampler 实现；frame_uniform 按所有实际帧采样。
+
+## 双臂全部任务共享一个 policy
+
+`configs/experiments/fastwam_dual.yaml` 设置 `group: dual_arm`、`tasks: null`，
+读取任务组当前的 5 个任务：`bimanual_microwave_cook`、`bimanual_unlock_ipad`、
+`bimanual_hanoi`、`bimanual_assembly`、`bimanual_photograph`。
+采用 `task_balanced` 采样，各任务通过语言指令区分；joint 模式只生成一个 run 和一套共享权重。
+
+状态 46 维、动作 44 维；三相机按 `base/wrist_left/wrist_right` 顺序横向拼接为 224×672。
+每卡 batch=1、梯度累积=8，四卡有效全局 batch=32；每进程 2 个 CPU 数据 worker，启用 W&B。
+每 1000 次更新计算各任务留出 loss，每任务最多 50 个全局批次，指标会标注是否全量。
+20000 步是五任务共享的更新预算；三相机显存和多 worker 吞吐仍需服务器短跑验证。
+
+从 DexJoCo 根目录启动，所有阶段保持相同参数：
+
+```bash
+FASTWAM_DUAL_ARGS=(
+  --experiment configs/experiments/fastwam_dual.yaml
+  --run-name fastwam_dual_all
+  --gpus 4,5,6,7
+  --mode joint
+)
+python scripts/train_fastwam_group.py "${FASTWAM_DUAL_ARGS[@]}" --dry-run
+python scripts/train_fastwam_group.py "${FASTWAM_DUAL_ARGS[@]}" --stage prepare
+python scripts/train_fastwam_group.py "${FASTWAM_DUAL_ARGS[@]}" --stage inspect
+python scripts/train_fastwam_group.py "${FASTWAM_DUAL_ARGS[@]}" --stage train
+```
+
+准备全部五个任务的数据，并提前登录 W&B。已有 ActionDiT 初始化骨干可复用；
+若尚未生成，在 train 前用相同参数执行一次 `--stage initialize`。
+首次短跑可为上述参数统一追加 `--steps 20` 并改用独立的 run-name，
+正式训练切换回新的 run-name。不要传 `--mode per_task`，否则会拆为五个独立 policy。
 
 ## 服务与闭环评测
 
@@ -238,9 +273,70 @@ python scripts/summarize_results.py \
 
 正式评测更换 evaluation-name、seeds 和 episode 数；`--rand-full` 启用视觉随机化。
 物体随机化沿用任务原环境，rand_full 不会自动改变训练数据。
-同一 evaluation-name 固定 checkpoint SHA256、配置签名、任务、步数和随机化设置，
+同一 evaluation-name 固定 checkpoint SHA256、配置签名、任务、步数、随机化设置、渲染后端和视频录制设置，
 已有完成 job 跳过；失败 job 需 `--retry-failed`。缺失 job 不报告完整任务均值。
 控制 hz 按示范标注及环境 step 接口定义；无需修改 MuJoCo 内部 physics_dt。
+
+### EGL 原生崩溃时隔离渲染后端
+
+如果日志先输出某回合 `success: true`，随后在 `mujoco_rendering.py` 的
+`mjr_readPixels` 路径出现 `Fatal Python error: Aborted`，该回合已成功，
+整个评测仍未完成，不能据此计算完整成功率。WebSocket 线程出现在栈中本身不能证明连接故障。
+
+批量入口支持 `--gl-backend osmesa`，将仿真图像改为 CPU 软件渲染，
+策略服务继续使用原有 GPU。需先同步评测脚本，保留正在运行的推理服务。
+在服务器的 `dexjoco` 环境先确认 OSMesa 可用：
+
+```bash
+MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa python -c \
+  'import mujoco; c=mujoco.GLContext(64,64); c.make_current(); c.free(); print("OSMesa OK")'
+```
+
+若缺少 OSMesa 库，需要安装与该环境兼容的 OSMesa 运行库后再评测。
+以下示例连接已经加载 v5 的 step 4000 权重、监听 8002 端口的服务：
+
+```bash
+conda activate dexjoco
+cd /aifs/chenkaiyue/physwam/dexjoco
+python scripts/evaluate_fastwam_group.py \
+  --run-dir runs/fastwam_water_single_4h100_v5 \
+  --tasks water_plant --host 127.0.0.1 --port 8002 \
+  --seeds 0 --episodes 2 --gl-backend osmesa \
+  --evaluation-name ckpt_004000_osmesa
+python scripts/summarize_results.py \
+  --evaluation-dir runs/fastwam_water_single_4h100_v5/evaluation/ckpt_004000_osmesa
+```
+
+软件渲染通常较慢；该方式用于隔离 EGL 路径，不能确认底层驱动或上下文故障的具体原因。
+切换后端必须使用新的 `evaluation-name`，避免覆盖原来的部分结果。
+`plan.json`、`result.json` 和汇总均记录后端；汇总拒绝混合 EGL 与 OSMesa 结果。
+原有未记录后端的 FastWAM 结果按 EGL 处理。
+
+### 保留 EGL，隔离视频录制路径
+
+如果简单 EGL 场景以及真实任务的保持姿态测试均通过，而完整策略评测仍崩溃，
+可以只关闭 MP4 录制进行对照。先同步批量入口、客户端 `evaluate.py` 和汇总脚本，
+推理服务不需重启：
+
+```bash
+MUJOCO_GL=egl PYOPENGL_PLATFORM=egl MUJOCO_EGL_DEVICE_ID=3 \
+PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 \
+python scripts/evaluate_fastwam_group.py \
+  --run-dir runs/fastwam_water_single_4h100_v5 \
+  --tasks water_plant --host 127.0.0.1 --port 8002 \
+  --seeds 0 --episodes 2 --gl-backend egl --no-video \
+  --evaluation-name ckpt_004000_egl_novideo
+```
+
+`--no-video` 不创建视频写入器，也不启动录制用的 FFmpeg 进程；
+双相机策略观测仍正常渲染，模型、动作执行、随机种子和成功判定不变。
+输出目录仍叫 `videos/`，其中保留 `episodes.jsonl`、`latency.jsonl` 和成功计数文件，
+但没有 MP4。计划、结果与汇总记录 `record_video: false`；旧版结果默认视为已录制。
+更换录制设置必须换评测名，汇总拒绝与计划不一致的录制设置。
+
+单次关闭录制后通过只表明故障在该次运行中未复现，不能直接证明 FFmpeg 是根因；
+策略动作导致的场景变化、时序变化及间歇性驱动故障仍需进一步区分。
+如果关闭录制仍崩溃，应获取崩溃进程的原生调用栈继续定位。
 
 ## 梯度检查点与启动兼容性
 

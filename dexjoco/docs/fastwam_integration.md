@@ -11,7 +11,7 @@ FastWAM 官方模型、注意力、flow matching 损失、训练器保持原样�
 | 位置 | 职责 |
 |---|---|
 | `configs/task_groups/*.yaml` | 复用现有任务成员、指令、相机映射、训练 episode 选择 |
-| `configs/experiments/fastwam_single.yaml` | 四卡单臂单任务正式配方，默认 20,000 步 |
+| `configs/experiments/fastwam_single.yaml` | 八卡单臂六任务联合训练配方，默认 30,000 步 |
 | `configs/experiments/fastwam_smoke.yaml` | 四卡真实数据短跑，20 步，每 10 步保存/验证 |
 | `scripts/train_fastwam_group.py` | 解析任务组，检查数据，写运行快照，启动官方训练 |
 | `fastwam/configs/data/dexjoco_*.yaml` | 单／双臂维度与序列适配器配置 |
@@ -82,18 +82,20 @@ source "$HOME/.config/physwam/fastwam-env.sh"
 源码运行脚本会把新 package 加入 PYTHONPATH；需要控制台入口时重新执行
 `python -m pip install -e ./dexjoco`，之后可运行 `dexjoco-fastwam-eval --help`。
 
-## 四卡配方与启动优先级
+## 训练配方与启动优先级
 
-`fastwam_single.yaml` 与 `fastwam_smoke.yaml` 默认单臂 water_plant；
-`fastwam_dual.yaml` 默认双臂全部任务联合训练一个 policy。配方均默认四卡 "0,1,2,3"。
+`fastwam_single.yaml` 默认单臂全部 6 个任务联合训练一个 policy，
+使用八卡 "0,1,2,3,4,5,6,7"，训练前需释放全部卡上的旧进程。
+`fastwam_smoke.yaml` 默认单臂 water_plant，`fastwam_dual.yaml` 默认双臂全部任务；
+这两个配方默认四卡 "0,1,2,3"。
 有效全局 batch=每卡 batch×卡数×梯度累积次数；以实际 YAML 和 dry-run 输出为准。
 保持 BF16、梯度检查点、ZeRO-1，未启用 CPU offload。
-这是按每卡 80GB 的四张 H100 规划的起点，显存与吞吐仍需服务器实测。
+这是按每卡 80GB 的 H100 规划的起点，显存与吞吐仍需服务器实测。
 `--group`、`--tasks`、`--gpus` 可覆盖 YAML；`tasks: null` 才会选择整个任务组。
 
 | 配方 | 更新步数 | 保存间隔 | 验证间隔 | 每任务验证批次上限 |
 |---|---:|---:|---:|---:|
-| fastwam_single.yaml（默认） | 20000 | 1000 | 1000 | 50 个全局批次 |
+| fastwam_single.yaml（默认，单臂全部任务，8 卡） | 30000 | 1000 | 1000 | 50 个全局批次 |
 | fastwam_smoke.yaml | 20 | 10 | 10 | 2 个全局批次 |
 | fastwam_dual.yaml（双臂全部任务） | 20000 | 1000 | 1000 | 50 个全局批次 |
 
@@ -149,12 +151,54 @@ python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage train \
 目录必须实际存在。smoke checkpoint 只用于检查加载和闭环，不作为正式性能结果。
 训练完成后，从下文的服务和评测入口进行闭环检查。
 
+## 八卡单臂全部任务联合训练
+
+`fastwam_single.yaml` 的 `tasks: null` 选择 water_plant、hammer_nail、click_mouse、
+pick_bucket、pinch_tongs、fold_glasses 六个任务，由语言指令区分，共享一个 policy。
+保持双相机、state/action 23/22 维、32 步动作和 9 帧视频；任务数量增加不增加单个样本的相机数。
+`task_balanced` 让各任务在虚拟数据集中占相同数量的索引，并不保证每个 batch 的任务数完全相等。
+
+起始参数为每卡 batch 16 × 8 卡 × 梯度累积 1 = 全局 batch 128，
+学习率保持 1e-4，max_steps=30000，对应固定 5% 预热为 1500 次优化器更新。
+训练预算不是单任务步数的机械倍增，应结合每任务留出集 loss 与闭环成功率选择 checkpoint。
+每卡 4 个数据 worker，共 32 个；实际 CPU、视频解码与存储吞吐仍需服务器检查。
+若后续提高每卡 batch，应同步比较全局 batch、每步耗时和样本吞吐；改参数后使用新的 run-name。
+
+先同步配置到服务器，确认 GPU 0–7 均已释放旧任务：
+
+```bash
+source /data/9qTymlC6XNreTg7J/home/miniforge3/etc/profile.d/conda.sh
+conda activate fastwam
+cd /aifs/chenkaiyue/physwam/dexjoco
+
+FASTWAM_ARGS=(
+  --experiment configs/experiments/fastwam_single.yaml
+  --run-name fastwam_single_all_8h100_v1
+)
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --dry-run
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage prepare
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage inspect
+python scripts/train_fastwam_group.py "${FASTWAM_ARGS[@]}" --stage train
+```
+
+不要附加 `--tasks water_plant`，它会覆盖 YAML 并退回单任务。
+prepare 会为六个任务重新固定训练/验证 episodes 并计算统一训练集归一化统计；
+inspect 应输出六条任务记录，video/action/proprio 分别为 [3,9,224,448]、[32,22]、[32,23]。
+已有 `fastwam/checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt` 可复用，
+文件存在时跳过 initialize；本配方从基础初始化开始，不加载旧 water_plant 策略 checkpoint。
+`--resume` 只用于继续本 run 的完整训练状态，不能用来切换任务集合或归一化统计。
+
+训练日志为 `runs/fastwam_single_all_8h100_v1/train.log`。
+每 1000 步保存、验证并启用 W&B；优先检查首批优化器更新的显存峰值、有限 loss 和实际吞吐。
+可先以本配方另建短跑 run（例如增加 `--steps 20`、换 run-name），通过后再新建正式 run；
+短跑的预算与学习率预热不同，不能把它的 loss 当作正式训练表现。
+
 ## 单任务正式训练
 
 ```bash
-# 默认 fastwam_single.yaml：water_plant，4 卡，20000 步
-python scripts/train_fastwam_group.py --run-name fastwam_water_single --stage prepare
-python scripts/train_fastwam_group.py --run-name fastwam_water_single --stage train
+# 默认配方为全部任务；通过 --tasks 显式选择 water_plant，其他参数沿用配方
+python scripts/train_fastwam_group.py --tasks water_plant --run-name fastwam_water_single --stage prepare
+python scripts/train_fastwam_group.py --tasks water_plant --run-name fastwam_water_single --stage train
 
 # 改为其他单臂任务（prepare/inspect/train 都保持相同参数）
 python scripts/train_fastwam_group.py --tasks hammer_nail \

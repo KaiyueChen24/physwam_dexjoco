@@ -29,17 +29,22 @@ def experiment():
     return yaml.safe_load(path.read_text())
 
 
-@pytest.mark.parametrize("profile,steps", [("fastwam_single", 20000), ("fastwam_smoke", 20)])
-def test_cli_reads_four_gpu_single_task_profile_without_explicit_launch_flags(profile, steps):
+@pytest.mark.parametrize("profile,steps,gpus,tasks,global_batch", [
+    ("fastwam_single", 30000, "0,1,2,3,4,5,6,7",
+     ["water_plant", "hammer_nail", "click_mouse", "pick_bucket", "pinch_tongs", "fold_glasses"], 128),
+    ("fastwam_smoke", 20, "0,1,2,3", ["water_plant"], 4),
+])
+def test_cli_reads_profile_without_explicit_launch_flags(profile, steps, gpus, tasks, global_batch):
     script = Path(__file__).resolve().parents[1] / "scripts/train_fastwam_group.py"
     result = subprocess.run([sys.executable, str(script), "--experiment",
                              f"configs/experiments/{profile}.yaml", "--run-name", "profile_contract", "--dry-run"],
                             capture_output=True, text=True, check=True)
     config = yaml.safe_load(result.stdout)
     framework = config["framework"]
-    assert framework["launch"] == {"gpus": "0,1,2,3", "num_processes": 4, "effective_global_batch_size": 4}
+    assert framework["launch"] == {"gpus": gpus, "num_processes": len(gpus.split(",")),
+                                   "effective_global_batch_size": global_batch}
     assert framework["group"]["name"] == "single_arm"
-    assert [t["name"] for t in framework["group"]["tasks"]] == ["water_plant"]
+    assert [t["name"] for t in framework["group"]["tasks"]] == tasks
     assert config["max_steps"] == steps
     assert config["model"]["action_dit_config"]["action_dim"] == 22
     if profile == "fastwam_smoke":

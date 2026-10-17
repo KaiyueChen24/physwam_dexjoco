@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--run-name", required=True, help='[配置与实验] 实验目录名，结果写入 runs/<名称>/。')
     parser.add_argument("--fastwam-root", help='[配置与实验] FastWAM 源码目录；默认使用 DexJoCo 的同级 fastwam/。')
     parser.add_argument("--dataset-root", help='[数据与 CPU] 覆盖任务数据根目录；相对路径以 DexJoCo 仓库根目录为准。')
-    parser.add_argument("--experiment", default="configs/experiments/fastwam_single.yaml", help='[配置与实验] 实验 YAML 路径；默认四卡单臂单任务正式配方，相对路径以 DexJoCo 仓库根目录为准。')
+    parser.add_argument("--experiment", default="configs/experiments/fastwam_single.yaml", help='[配置与实验] 实验 YAML 路径；默认八卡单臂六任务联合训练配方，相对路径以 DexJoCo 仓库根目录为准。')
     parser.add_argument("--tasks", nargs="+", help='[任务选择] 覆盖实验 YAML 的 tasks；YAML 中 tasks 为 null 时使用全部任务。')
     parser.add_argument("--mode", choices=("joint", "per_task"), default="joint", help='[训练] joint 为组内共享一个策略；per_task 为逐任务分别训练。')
     parser.add_argument("--stage", choices=("prepare", "inspect", "initialize", "train"), default="prepare", help='[训练] prepare 检查与统计；inspect 检查序列；initialize 构造动作骨干；train 启动官方训练器。')

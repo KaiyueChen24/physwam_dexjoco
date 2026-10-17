@@ -10,6 +10,7 @@ def summarize(directory):
     directory = Path(directory)
     plan = json.loads((directory / "plan.json").read_text())
     task_names = list(dict.fromkeys(job["task"] for job in plan["jobs"]))
+    gl_backend = plan.get("gl_backend", "egl")
     tasks = []
     for task in task_names:
         successes = episodes = 0
@@ -23,6 +24,8 @@ def summarize(directory):
                 continue
             if result.get("checkpoint") != plan["server"]["checkpoint"] or result.get("episodes") != job["episodes"]:
                 raise ValueError("Result provenance/count does not match evaluation plan")
+            if result.get("gl_backend", "egl") != gl_backend:
+                raise ValueError("Result rendering backend does not match evaluation plan")
             if not 0 <= result["successes"] <= result["episodes"]:
                 raise ValueError("Invalid success count")
             successes += result["successes"]
@@ -34,7 +37,7 @@ def summarize(directory):
                       "complete": not missing, "missing_or_failed_seeds": missing, "latency": latency})
     complete = all(t["complete"] for t in tasks)
     return {"group": plan["group"], "run_name": plan["run_name"], "checkpoint": plan["server"]["checkpoint"],
-            "complete": complete, "benchmark_eligible": not (plan["server"].get("synthetic") or plan["server"].get("tiny")),
+            "gl_backend": gl_backend, "complete": complete, "benchmark_eligible": not (plan["server"].get("synthetic") or plan["server"].get("tiny")),
             "evaluated_tasks": task_names,
             "all_group_tasks_evaluated": set(task_names) == set(plan["server"]["tasks"]),
             "task_mean_success_rate": sum(t["success_rate"] for t in tasks) / len(tasks) if complete else None,

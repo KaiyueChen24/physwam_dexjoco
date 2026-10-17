@@ -43,6 +43,13 @@ def latency_summary(path):
     return result
 
 
+def rendering_environment(backend):
+    if backend not in {"egl", "osmesa"}:
+        raise ValueError(f"Unsupported rendering backend: {backend}")
+    # Set before the child imports MuJoCo/PyOpenGL; both variables must agree.
+    return {**os.environ, "MUJOCO_GL": backend, "PYOPENGL_PLATFORM": backend}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, help='[配置与实验] 已有实验目录，从中读取配置快照和资产。')
@@ -53,6 +60,8 @@ def main():
     parser.add_argument("--episodes", type=int, default=50, help='[闭环评测] 每个任务、每个 seed 的评测回合数。')
     parser.add_argument("--tasks", nargs="+", help='[任务选择] 仅选择列出的任务；默认使用所选任务组或快照中的全部任务。')
     parser.add_argument("--evaluation-name", default="rand_obj", help='[闭环评测] 本次评测结果子目录名；仅命名，不会自动切换随机化。')
+    parser.add_argument("--gl-backend", choices=("egl", "osmesa"), default="egl",
+                        help="[评测/渲染] egl 使用 GPU；osmesa 使用 CPU 软件渲染，供 EGL 故障诊断。")
     parser.add_argument("--timeout", type=float, default=7200, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
@@ -71,7 +80,7 @@ def main():
     tasks = [t for t in group["tasks"] if not args.tasks or t["name"] in args.tasks]
     jobs = [{"task": t["name"], "seed": s, "episodes": args.episodes} for t in tasks for s in args.seeds]
     if args.dry_run:
-        print(json.dumps({"group": group["name"], "jobs": jobs}, indent=2))
+        print(json.dumps({"group": group["name"], "gl_backend": args.gl_backend, "jobs": jobs}, indent=2))
         return
     executable = shutil.which("dexjoco-openpi-eval")
     if not executable:
@@ -89,10 +98,13 @@ def main():
         raise ValueError("Synthetic/tiny checkpoints cannot be used for benchmark reporting")
     evaluation_dir = Path(resolved["run_dir"]) / "evaluation" / args.evaluation_name
     evaluation_dir.mkdir(parents=True, exist_ok=True)
-    plan = {"group": group["name"], "run_name": resolved["run_name"], "server": metadata, "jobs": jobs}
+    plan = {"group": group["name"], "run_name": resolved["run_name"], "server": metadata, "jobs": jobs, "gl_backend": args.gl_backend}
     plan_path = evaluation_dir / "plan.json"
-    if plan_path.exists() and json.loads(plan_path.read_text()) != plan:
-        raise ValueError("Evaluation plan/checkpoint changed; use a new evaluation-name")
+    if plan_path.exists():
+        old_plan = json.loads(plan_path.read_text())
+        old_plan.setdefault("gl_backend", "egl")  # Legacy plans always forced EGL.
+        if old_plan != plan:
+            raise ValueError("Evaluation plan/checkpoint/rendering backend changed; use a new evaluation-name")
     plan_path.write_text(json.dumps(plan, indent=2))
     failures = []
     for job in jobs:
@@ -125,12 +137,12 @@ def main():
                    "--output", str(output), "--metrics-output", str(latency_path),
                    "--render-mode", "rgb_array"]
         result = {**job, "group": group["name"], "checkpoint": metadata["checkpoint"],
-                  "data_source": "lerobot",
+                  "data_source": "lerobot", "gl_backend": args.gl_backend,
                   "command": command, "output": str(output), "status": "failed"}
         print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)
         try:
             with (attempt / "eval.log").open("w") as log:
-                process = subprocess.Popen(command, cwd=ROOT, env={**os.environ, "MUJOCO_GL": "egl"},
+                process = subprocess.Popen(command, cwd=ROOT, env=rendering_environment(args.gl_backend),
                                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                 try:
                     returncode = process.wait(timeout=args.timeout)

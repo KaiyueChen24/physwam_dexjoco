@@ -349,6 +349,8 @@ python scripts/summarize_results.py \
 首次推理可能触发数分钟的 JAX 编译与 cuDNN 算法选择；`slow_operation_alarm` 本身不表示失败。服务端将推理放在线程中串行执行，保持 WebSocket 心跳响应；评测器每回合等待首批动作后才推进仿真（默认最多等待 300 秒），避免编译时间耗尽回合。回合内仍沿用异步重规划与缺动作时保持姿态的逻辑。推理子进程退出会使评测明确失败，不再无限等待。更新这部分代码后须重启策略服务和评测进程；重跑使用新的 `evaluation-name`，以免跳过已有结果。
 推理子进程及其队列、事件统一使用 `spawn` 上下文，防止 Linux 默认 `fork` 继承已经创建的 MuJoCo/EGL 渲染器资源。日志应出现 `Inference worker start method: spawn`。若仍发生 `SIGABRT`，在评测终端设置 `PYTHONFAULTHANDLER=1` 和 `PYTHONUNBUFFERED=1` 后重试，保留原始调用栈；渲染层崩溃不能计作模型的正常失败回合。
 
+若 GDB 调用栈显示 `mjr_readPixels → libnvidia-eglcore → abort`，可以用 `evaluate_group.py --gl-backend osmesa` 显式切换到 CPU 软件渲染进行诊断（系统需安装 `libosmesa6`）。π0.5 策略服务仍使用 GPU。默认后端为 `egl`；子进程启动前会同步设置 `MUJOCO_GL` 与 `PYOPENGL_PLATFORM`。后端会记录在 `plan.json`、逐 job 的 `result.json` 和 `summary.json` 中；同一 evaluation-name 不允许切换后端，汇总也拒绝混合后端。`benchmark_eligible` 只检查 checkpoint 是否为真实模型，不代表诊断配置符合正式 benchmark；OSMesa 结果应单独保存，不与 EGL 成功率或控制延迟混合比较。
+
 任务的环境、相机和 prompt 使用训练时保存的任务组配置。
 
 结果包含逐任务视频、日志、成功次数、`latency.jsonl`，以及 JSON/CSV 汇总。

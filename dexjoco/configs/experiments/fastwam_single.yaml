@@ -22,7 +22,7 @@ image_size: [224, 224]                 # [数据/图像] 每个相机的目标 [
 sampling: task_balanced                # [数据/采样] 等长虚拟任务分区实现任务均衡；frame_uniform 按原始帧连接。
 
 # 【训练与优化 / train】
-batch_size: 1                          # [训练/批次] 每张 GPU 的 batch；与 π0.5 的全局 batch 定义不同。
+batch_size: 32                         # [训练/批次] 每张 GPU 的 batch；与 π0.5 的全局 batch 定义不同。
 gradient_accumulation_steps: 1         # [训练/梯度累积] 累积多少个微批次后更新；有效全局 batch=本地 batch×卡数×累积次数。
 num_workers: 0                         # [数据/CPU] 每个训练进程的数据加载工作进程数；0 表示本进程加载。
 max_steps: 20000                       # [训练/预算] 优化器更新总步数，不是 epoch。
@@ -49,4 +49,4 @@ validation_ratio: 0.1                  # [验证/划分] 每任务留出的完�
 validation_seed: 42                    # [验证/随机性] episode 划分及验证噪声的固定种子，两种模型使用相同值可复用划分。
 validation_interval: 1000              # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
 validation_batch_size: 1               # [验证/批次] 每张 GPU 的验证 batch，不进行梯度累积。
-validation_max_batches: null           # [验证/预算] null 遍历完整留出集；整数限制每任务验证批次数，结果会标注是否全量。
+validation_max_batches: 50           # [验证/预算] null 遍历完整留出集；整数限制每任务验证批次数，结果会标注是否全量。

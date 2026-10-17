@@ -103,6 +103,21 @@ smoke 使用同一个官方训练器与真实数据；没有 dummy 模型，也�
 它不会自动检查参数差分或自动恢复后再多训一步。保存、验证的结果应结合日志检查，恢复需要显式命令。
 正式训练请使用新的 run-name，不在同一 run 内切换配方或修改预算。
 
+### W&B 运行名称
+
+可直接在 `configs/experiments/fastwam_single.yaml` 中设置：
+
+```yaml
+wandb_enabled: true
+wandb_name: fastwam_single_all_8h100
+```
+
+`wandb_name` 覆盖基础 `fastwam/configs/train.yaml` 的 `wandb.name`；
+设为 `null` 时跟随该次启动的 `--run-name`（per_task 模式包含任务后缀）。
+省略字段的旧配方保持基础配置名称，兼容旧 run；名称必须是非空字符串或 null。
+名称不改变输出目录，生成后的值保存在 `runs/<run-name>/fastwam_config.yaml` 的 `wandb.name`。
+已 prepare 的 run 固定配置快照，修改该字段后应使用新 run-name；不会重命名正在运行的 W&B 记录。
+
 ## 数据与首次短跑
 
 以下命令均从 `~/physwam/dexjoco` 执行，在独立 fastwam 环境中运行：

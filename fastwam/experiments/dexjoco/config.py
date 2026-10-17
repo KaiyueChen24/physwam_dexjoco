@@ -105,6 +105,12 @@ def build_config(dexjoco_root, group_name, experiment, run_name, *, task_names=N
     # [训练/预算] num_epochs 仅供 max_steps 缺失时估算总步数；本入口由实验 YAML 的 max_steps 决定结束。
     config.update(output_dir=str(run_dir), model=model, resume=None, eval_every=0, num_epochs=100000)
     config["wandb"]["enabled"] = bool(exp["wandb_enabled"])
+    # Optional experiment override; absent fields preserve legacy run snapshots.
+    if "wandb_name" in exp:
+        wandb_name = exp["wandb_name"]
+        if wandb_name is not None and (not isinstance(wandb_name, str) or not wandb_name.strip()):
+            raise ValueError("wandb_name must be a nonempty string or null (use run-name)")
+        config["wandb"]["name"] = run_name if wandb_name is None else wandb_name
     data = read_yaml(FASTWAM_ROOT / "configs/data" / f"dexjoco_{'single' if group_name == 'single_arm' else 'dual'}.yaml")
     data["train"].update(tasks=group["tasks"], action_horizon=horizon, video_stride=stride,
                          camera_order=group["camera_order"], image_size=exp["image_size"], sampling=exp["sampling"],

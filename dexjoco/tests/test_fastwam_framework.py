@@ -47,9 +47,39 @@ def test_cli_reads_profile_without_explicit_launch_flags(profile, steps, gpus, t
     assert [t["name"] for t in framework["group"]["tasks"]] == tasks
     assert config["max_steps"] == steps
     assert config["model"]["action_dit_config"]["action_dim"] == 22
+    if profile == "fastwam_single":
+        profile_config = yaml.safe_load((ROOT / "configs/experiments/fastwam_single.yaml").read_text())
+        expected_name = profile_config["wandb_name"] if profile_config["wandb_name"] is not None else "profile_contract"
+        assert config["wandb"]["name"] == expected_name
     if profile == "fastwam_smoke":
         assert config["save_every"] == 10
         assert framework["experiment"]["validation_max_batches"] == 2
+
+
+
+@pytest.mark.parametrize("selection", ["explicit", "run_name", "legacy"])
+def test_experiment_wandb_name_override_and_legacy_compatibility(experiment, selection):
+    run_name = "wandb_name_contract"
+    if selection == "explicit":
+        experiment["wandb_name"] = "single_arm_joint_custom"
+        expected = "single_arm_joint_custom"
+    elif selection == "run_name":
+        experiment["wandb_name"] = None
+        expected = run_name
+    else:
+        experiment.pop("wandb_name", None)
+        expected = yaml.safe_load((FASTWAM_ROOT / "configs/train.yaml").read_text())["wandb"]["name"]
+    config = build_config(ROOT, "single_arm", experiment, run_name)
+    assert config["wandb"]["name"] == expected
+    assert config["framework"]["run_name"] == run_name
+    assert Path(config["output_dir"]).name == run_name
+
+
+@pytest.mark.parametrize("value", ["", "   ", 123, False])
+def test_invalid_experiment_wandb_name_fails_before_training(experiment, value):
+    experiment["wandb_name"] = value
+    with pytest.raises(ValueError, match="wandb_name"):
+        build_config(ROOT, "single_arm", experiment, "invalid_wandb_name")
 
 
 def test_cli_flags_override_profile_gpu_task_group_and_budget():

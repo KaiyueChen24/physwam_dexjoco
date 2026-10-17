@@ -24,6 +24,7 @@
 - `configs/experiments/pi05_full.yaml`：默认四卡 FSDP，单臂六任务联合全量微调 π0.5。
 - `configs/experiments/pi05_smoke.yaml`：相同全量更新范围与四卡 FSDP，真实数据 20 步短跑。
 - `configs/experiments/fastwam_single.yaml`：8 张 H100（GPU 0–7），单臂全部六任务联合训练；每卡 batch 16、累积 1，全局 batch 128，30,000 步首轮预算。
+- FastWAM 实验 YAML 可选 `wandb_name`：设置 W&B 显示名；`null` 跟随 `--run-name`，省略则继承基础配置名称。
 - `configs/experiments/fastwam_smoke.yaml`：相同模型与数据契约，20 步真实数据短跑，每 10 步保存/验证。
 - `configs/experiments/fastwam_dual.yaml`：四卡、双臂全部 5 个任务联合训练一个 policy；每卡 batch=1、累积 8 次，全局 batch=32，启用 W&B。
 - `configs/task_groups/{single_arm,dual_arm}.yaml`：两组共享的任务与数据契约。

@@ -410,6 +410,10 @@ python scripts/evaluate_fastwam_group.py \
 `validation_batch_size: 8` 或关闭验证；普通 VAE 前向的耗时需服务器实测。
 本地测试包含真实微型 Wan VAE 的数值对照、训练→验证→尾批次→训练、
 完整验证计数和 RNG/梯度保留；CUDA 环境还会运行实际 CUDA Graph 后端测试。
+CUDA 测试使用 BF16、32 通道 attention head 和 32×32 图像，避免过小测试模型
+触发融合 SDPA 的布局限制；CPU 测试检查同一测试模型的 QKV 对齐。
+若旧测试在 `expected = encoder.encode(...)` 报 `query is not correctly aligned (strideM)`，
+它尚未进入 CUDA Graph 比较，需要同步修正后的测试，不能据此判断生产形状保护已失效。
 
 ```bash
 # FastWAM 环境，DexJoCo 根目录；不下载模型权重

@@ -127,15 +127,42 @@ def test_validation_keeps_every_tail_sample_and_restores_training_capture(monkey
     assert [shape[0] for shape in compiled_calls] == [16, 16]
 
 
+def make_cuda_probe_encoder(device):
+    # SDPA's fused CUDA kernels constrain QKV alignment. The old dim=2 probe
+    # produced a 4-channel attention head and chunk strides unsupported on H100.
+    # Keep heads aligned and use BF16, as in the actual training configuration.
+    return VideoVAE38_(dim=16, z_dim=4, dec_dim=16, dim_mult=[1, 2, 2, 2],
+                       num_res_blocks=1).to(device=device, dtype=torch.bfloat16).eval().requires_grad_(False)
+
+
+def test_cuda_probe_has_aligned_bf16_attention_inputs(monkeypatch):
+    original_sdpa = torch.nn.functional.scaled_dot_product_attention
+    seen = []
+    def check_layout(query, key, value, *args, **kwargs):
+        for tensor in (query, key, value):
+            assert tensor.dtype == torch.bfloat16
+            assert tensor.shape[-1] == 32
+            assert tensor.stride(-1) == 1
+            assert tensor.stride(-2) * tensor.element_size() % 16 == 0
+            assert tensor.data_ptr() % 16 == 0
+        seen.append(query.shape)
+        return original_sdpa(query, key, value, *args, **kwargs)
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", check_layout)
+    encoder = make_cuda_probe_encoder("cpu")
+    with torch.no_grad():
+        latents = encoder.encode(torch.randn(2, 3, 5, 32, 32, dtype=torch.bfloat16),
+                                 [torch.zeros(4), torch.ones(4)])
+    assert seen and latents.shape[0] == 2 and latents.dtype == torch.bfloat16
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires CUDA for the actual CUDA Graph backend")
 def test_real_cuda_graph_with_validation_shapes():
-    encoder = VideoVAE38_(dim=2, z_dim=2, dec_dim=2, dim_mult=[1, 2, 2, 2],
-                         num_res_blocks=1).cuda().eval().requires_grad_(False)
+    encoder = make_cuda_probe_encoder("cuda")
     model = SimpleNamespace(device=torch.device("cuda"),
-        vae=SimpleNamespace(model=encoder, scale=[torch.zeros(2, device="cuda"), torch.ones(2, device="cuda")]))
+        vae=SimpleNamespace(model=encoder, scale=[torch.zeros(4, device="cuda"), torch.ones(4, device="cuda")]))
     saved = []
     for size in (16, 8, 6, 1, 8, 16):
-        video = torch.randn(size, 3, 5, 16, 16, device="cuda")
+        video = torch.randn(size, 3, 5, 32, 32, device="cuda", dtype=torch.bfloat16)
         with torch.no_grad():
             expected = encoder.encode(video, model.vae.scale).clone()
         actual = FastWAM._encode_video_latents(model, video)

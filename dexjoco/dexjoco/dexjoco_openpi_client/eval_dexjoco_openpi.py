@@ -221,6 +221,37 @@ def receive_actions(
             break
 
 
+def _check_inference_worker(inference_proc):
+    if not inference_proc.is_alive():
+        raise RuntimeError(
+            f"Inference worker exited (exitcode={inference_proc.exitcode}); "
+            "see its traceback and the policy server log."
+        )
+
+
+def _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm, timeout=300.0):
+    """Wait without advancing simulation time, including first-call JAX compilation."""
+    deadline = time.monotonic() + timeout
+    while not actions_buffer:
+        _check_inference_worker(inference_proc)
+        receive_actions(action_queue, actions_buffer, 0, dual_arm)
+        if actions_buffer:
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Timed out waiting for the first policy action chunk ({timeout:g}s).")
+        time.sleep(0.01)
+
+
+def _wait_for_inference(inferencing_event, inference_proc, timeout=300.0):
+    deadline = time.monotonic() + timeout
+    while inferencing_event.is_set():
+        _check_inference_worker(inference_proc)
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Timed out draining the pending inference request.")
+        time.sleep(0.01)
+    _check_inference_worker(inference_proc)
+
+
 def _append_video_frames(video_writers: dict, raw_images: dict):
     for cam_name, writer in video_writers.items():
         writer.append_data(raw_images[cam_name])
@@ -369,6 +400,10 @@ def main(
             inferencing_event.set()
             obs_queue.put(Observation(env.get_obs(), timestamp))
 
+            # Start the episode clock only after the first chunk is ready.
+            print("Waiting for first policy actions (initial JAX compilation may take several minutes)...", flush=True)
+            _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm)
+
             # Save the reset frame.
             raw_images = env.get_raw_images()
             _append_video_frames(video_writers, raw_images)
@@ -380,6 +415,7 @@ def main(
 
             # Episode loop.
             while True:
+                _check_inference_worker(inference_proc)
                 receive_actions(action_queue, actions_buffer, timestamp, dual_arm)
 
                 # Execute the scheduled action for this timestamp, or hold the pose.
@@ -451,8 +487,7 @@ def main(
                     obs_queue.get_nowait()
                 except Empty:
                     break
-            while inferencing_event.is_set():
-                time.sleep(0.1)
+            _wait_for_inference(inferencing_event, inference_proc)
             while not action_queue.empty():
                 action_queue.get()
 

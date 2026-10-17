@@ -29,6 +29,8 @@ class WebsocketPolicyServer:
         self._host = host
         self._port = port
         self._metadata = metadata or {}
+        # Policy RNG/state is shared across connections; serialize inference calls.
+        self._inference_lock = asyncio.Lock()
         logging.getLogger("websockets.server").setLevel(logging.INFO)
 
     def serve_forever(self) -> None:
@@ -58,7 +60,10 @@ class WebsocketPolicyServer:
                 obs = msgpack_numpy.unpackb(await websocket.recv())
 
                 infer_time = time.monotonic()
-                action = self._policy.infer(obs)
+                # First-call JAX compilation can take minutes. Keep the event loop
+                # available for WebSocket pings while inference runs in a thread.
+                async with self._inference_lock:
+                    action = await asyncio.to_thread(self._policy.infer, obs)
                 infer_time = time.monotonic() - infer_time
 
                 action["server_timing"] = {

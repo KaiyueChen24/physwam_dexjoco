@@ -248,16 +248,22 @@ class FastWAM(torch.nn.Module):
     def _encode_video_latents(self, video_tensor, tiled=False, tile_size=(30, 52), tile_stride=(15, 26)):
         if tiled:
             raise NotImplementedError("Batched VAE encoding does not support tiled encoding.")
+        video_tensor = video_tensor.to(self.device)
+        input_spec = (tuple(video_tensor.shape), tuple(video_tensor.stride()),
+                      video_tensor.dtype, video_tensor.device)
         if not hasattr(self, "_vae_encode_compiled"):
             self._vae_encode_compiled = torch.compile(
                 self.vae.model.encode,
                 backend="cudagraphs",
                 fullgraph=True,
+                dynamic=False,
             )
-        return self._vae_encode_compiled(
-            video_tensor.to(self.device),
-            self.vae.scale,
-        ).clone()
+            self._vae_encode_input_spec = input_spec
+        # Keep the capture static. Validation and training tails can have a
+        # different batch size; eager encoding retains their exact samples/loss.
+        encode = (self._vae_encode_compiled
+                  if input_spec == self._vae_encode_input_spec else self.vae.model.encode)
+        return encode(video_tensor, self.vae.scale).clone()
 
     @torch.no_grad()
     def _encode_input_image_latents_tensor(self, input_image: torch.Tensor, tiled=False, tile_size=(30, 52), tile_stride=(15, 26)):

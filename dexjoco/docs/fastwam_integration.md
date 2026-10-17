@@ -397,6 +397,33 @@ python scripts/evaluate_fastwam_group.py \
 策略动作导致的场景变化、时序变化及间歇性驱动故障仍需进一步区分。
 如果关闭录制仍崩溃，应获取崩溃进程的原生调用栈继续定位。
 
+## 验证尾批次与 VAE CUDA Graph
+
+如果训练正常到第 1000 步，第一次验证在 VAE 编码的 `cudagraph_trees.py` 报
+`The size of tensor a (8) must match the size of tensor b (6)`，需要同步
+`fastwam/src/fastwam/models/wan22/fastwam.py` 的 VAE 输入形状保护。
+训练固定形状仍使用静态 CUDA Graph；与首次捕获的形状、stride、精度或设备不一致的输入
+使用相同 VAE 的普通前向，避免验证 batch 8、尾批次 6、缺样本 rank 的占位 batch 1
+进入已有静态捕获。训练尾批次也受保护，恢复原形状时继续复用原捕获。
+
+该修复不丢弃样本、不补齐有效样本、不改归一化和验证加权计数，不需要降低
+`validation_batch_size: 8` 或关闭验证；普通 VAE 前向的耗时需服务器实测。
+本地测试包含真实微型 Wan VAE 的数值对照、训练→验证→尾批次→训练、
+完整验证计数和 RNG/梯度保留；CUDA 环境还会运行实际 CUDA Graph 后端测试。
+
+```bash
+# FastWAM 环境，DexJoCo 根目录；不下载模型权重
+OMP_NUM_THREADS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+  python -m pytest -q tests/test_fastwam_vae_batching.py
+```
+
+先用新的 run-name、`--steps 20 --stage train` 检查最终验证能够完成，
+再创建正式 run；不要直接等到第 1000 步才确认验证路径。
+代码修复不改变 run 快照，已有完整训练状态可按原配置 `--resume`；
+当前保存顺序在验证之后，第 1000 步验证失败不能证明已保存该步 checkpoint。
+恢复前需检查 `checkpoints/state/step_*/trainer_state.json` 及完整状态资产，
+没有有效状态时需新建 run 重训，日志中的 step 不能用于恢复。
+
 ## 梯度检查点与启动兼容性
 
 DexJoCo 配方使用 `gradient_checkpointing: true`，生成的模型配置保持

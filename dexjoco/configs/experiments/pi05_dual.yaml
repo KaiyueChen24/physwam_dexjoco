@@ -34,20 +34,20 @@ checkpoint_paths:                       # [初始化/路径] 按 --group 选择�
 seed: 42                                # [训练/随机性] 模型、数据采样与统计使用的随机种子。
 batch_size: 256                         # [训练/批次] 全局 batch 256，八卡每卡 32；10 万步共抽取 2560 万条样本。
 num_workers: 32                         # [数据/CPU] 视频解码与预处理进程数；须结合可用 CPU 与实测吞吐调整。
-num_train_steps: 100000                 # [训练/预算] 参数更新总步数，不是 epoch；本配方单、双臂均用此值。
+num_train_steps: 30000                  # [训练/预算] 参数更新总步数，不是 epoch；本配方单、双臂均用此值。
 learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前 Python 将衰减终点设为相同值。
 warmup_steps: 10000                     # [训练/预热] 前多少次更新逐渐提高学习率，之后维持 learning_rate。
 
 # 【日志与模型保存 / logging & checkpoint】
 wandb_enabled: true                     # [日志/在线记录] 启用 W&B；启动前在 pi05 环境执行 wandb login。
 wandb_project: physwam_dexjoco          # [日志/项目] W&B 项目名；所属个人/团队由登录账号或 WANDB_ENTITY 指定。
-log_interval: 2000                      # [日志/频率] 训练指标的记录间隔，单位为训练步。
-save_interval: 2000                     # [保存/频率] checkpoint 保存间隔；训练结束还会保存最终状态。
-keep_period: 2000                       # [保存/保留] 长期保留编号为此值倍数的 checkpoint，此外保留最新一个。
+log_interval: 100                      # [日志/频率] 训练指标的记录间隔，单位为训练步。
+save_interval: 1000                     # [保存/频率] checkpoint 保存间隔；训练结束还会保存最终状态。
+keep_period: 1000                       # [保存/保留] 长期保留编号为此值倍数的 checkpoint，此外保留最新一个。
 
 # 【验证集 / validation：只计算 loss，不参与训练】
 validation_ratio: 0.1                   # [验证/划分] 每任务留出的完整 episode 比例；0 关闭，按数量向上取整且保留训练 episode。
 validation_seed: 42                     # [验证/随机性] episode 划分及验证噪声的固定种子，两种模型使用相同值可复用划分。
-validation_interval: 2000               # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
+validation_interval: 1000               # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
 validation_batch_size: 32               # [验证/GPU 批次] 全局 32，八卡每卡 4；独立于训练 batch。
 validation_max_batches: 12              # [验证/预算] 每任务最多 12 批，即 384 帧；null 才遍历全部留出帧。

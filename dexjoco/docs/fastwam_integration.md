@@ -336,6 +336,43 @@ python scripts/summarize_results.py \
 已有完成 job 跳过；失败 job 需 `--retry-failed`。缺失 job 不报告完整任务均值。
 控制 hz 按示范标注及环境 step 接口定义；无需修改 MuJoCo 内部 physics_dt。
 
+### 保留 EGL 抓取原生调用栈
+
+EGL 简单场景与保持姿态测试通过，完整策略评测仍在 `mjr_readPixels` 中止时，
+可直接复用失败 job 的命令调试真实评测子进程：
+
+```bash
+conda activate dexjoco
+cd /aifs/chenkaiyue/physwam/dexjoco
+python scripts/debug_fastwam_egl.py \
+  --result runs/fastwam_water_single_4h100_v5/evaluation/ckpt_004000_egl_novideo/water_plant_seed0/result.json \
+  --egl-device-id 3
+```
+
+需要安装 GDB，并运行与原 job 的 `server.json` 匹配的策略服务；脚本复用原命令的
+解释器、端口、seed、episode 数和录制选项，将图形后端设为 EGL。
+`--egl-device-id` 是 EGL 枚举编号。八卡用于训练时，需安排可用推理资源再运行此诊断。
+`--dry-run` 可以先打印命令和新输出位置，不启动调试器或创建文件。
+
+输出保存在该 job 的 `egl_debug/<新标识>/`，包括 `debug_plan.json`、`gdb.log`、
+`debugger_exit.json` 和子进程的 `metrics/`；不会覆盖原结果或计入正式评测汇总。
+脚本首先打印日志路径，另开终端 `tail -f <gdb.log路径>` 可跟踪进度。
+结束后提取：
+
+```bash
+sed -n '/received signal/,+100p' <gdb.log路径>
+```
+
+GDB 报 `Operation not permitted` 或 ptrace 错误时，需要运行环境提供调试权限；
+没有原生栈时，不能仅凭 Python 的渲染栈认定某个驱动版本有问题。
+GDB 返回码仅反映调试器运行情况，不等于评测是否成功。
+
+OSMesa 使用 CPU 软件渲染，通常会增加图像生成耗时；总评测速度还取决于策略推理、
+物理步进、环境的 Hz 限速和视频编码。当前 water_plant 每步生成两张 640×640 图像，
+每执行 8 步约有 16 次相机渲染和 1 次策略请求。
+`latency.jsonl` 的 `roundtrip_ms` 和 `server_infer_ms` 都不包含仿真渲染耗时，
+不能直接用这两个指标计算换 EGL 后的总加速比。
+
 ### EGL 原生崩溃时隔离渲染后端
 
 如果日志先输出某回合 `success: true`，随后在 `mujoco_rendering.py` 的

@@ -107,7 +107,9 @@ def main():
     if args.mode == "per_task":
         if args.stage == "initialize":
             parser.error("Initialization is shared; use --mode joint")
-        selections = [[t["name"]] for t in select_group(ROOT, args.group, args.tasks)["tasks"]]
+        selections = [[t["name"]] for t in select_group(
+            ROOT, args.group, args.tasks, args.dataset_root or experiment.get("dataset_root"),
+            data_regime=experiment.get("data_regime", "rand_obj"))["tasks"]]
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
     os.environ.setdefault("DIFFSYNTH_MODEL_BASE_PATH", str(fastwam_root / "checkpoints"))
     os.environ["PYTHONPATH"] = os.pathsep.join([str(fastwam_root), str(fastwam_root / "src"), os.environ.get("PYTHONPATH", "")])

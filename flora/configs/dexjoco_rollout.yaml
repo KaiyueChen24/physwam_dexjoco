@@ -1,28 +1,40 @@
-schema_version: 1
-task_group: dexjoco/configs/task_groups/single_arm.yaml
-tasks: [pick_bucket]
+# 相对路径以 physwam 为根目录；详细说明见 flora/docs/upstream_audit.md。
+
+schema_version: 1  # 配置格式版本
+task_group: dexjoco/configs/task_groups/single_arm.yaml  # 任务组：提供任务指令和相机映射
+tasks: [pick_bucket]  # 录像对应的任务；只能选一个
+
+# 数据准备
 source:
-  kind: rollout
-  root: null         # 必填：某次 FastWAM 评测 attempt 目录，或其 videos/ 目录。
-  episodes: null
-  limit_per_task: 20
+  kind: rollout  # lerobot：示范数据；rollout：评测录像；manifest：已有清单
+  root: null  # 必填：评测 attempt 或 videos 目录，需含录像及 episodes.jsonl
+  episodes: null  # 指定 episode 编号列表；null 表示不筛选
+  limit_per_task: 20  # 每个任务按编号取前 N 条；null 表示不限
+
+# 运行环境
 runtime:
-  gpus: "0"
-  rewarder_python: flora/.venv-rewarder/bin/python
-  captioner_python: flora/.venv-captioner/bin/python
-  hf_home: flora/models/huggingface
-  model_cache: flora/models/data_engine
+  gpus: "0"  # GPU 编号，如 "2,3"；命令行 --gpus 可覆盖
+  rewarder_python: flora/.venv-rewarder/bin/python  # Rewarder 环境的 Python 路径
+  captioner_python: flora/.venv-captioner/bin/python  # TempSeg / Captioner 环境的 Python 路径
+  hf_home: flora/models/huggingface  # Hugging Face 缓存目录
+  model_cache: flora/models/data_engine  # TempSeg / Captioner 模型缓存目录
+
+# 视频评分：terminal / dense / rubric
 rewarder:
-  tensor_parallel_size: 1
-  rubric_tensor_parallel_size: 2
-  max_num_seqs: 1
-  gpu_memory_utilization: 0.85
-  with_rationale: true
-  seed: 0
+  tensor_parallel_size: 1  # terminal / dense 使用的张量并行卡数
+  rubric_tensor_parallel_size: 2  # rubric 张量并行卡数；需提供足够的可见 GPU
+  max_num_seqs: 1  # 最大并发序列数
+  gpu_memory_utilization: 0.85  # vLLM 每卡显存预算比例，范围 (0, 1)
+  with_rationale: true  # terminal 是否生成评分理由
+  seed: 0  # 推理随机种子
+
+# 视频标注：TempSeg 分段 → Captioner 描述
 caption:
-  profile: dex
-  views: main
-  include_audit: true
+  profile: dex  # 输入处理模式：human / dex / yam / tianji
+  views: main  # main：主视角；three：主视角和双腕；auto：自动选择
+  include_audit: true  # 保存时序和模型输入的调试记录
+
+# 按任务评分表评估
 rubric:
-  num_samples: 9
-  files: {}
+  num_samples: 9  # 每条视频生成的候选回答数，再选代表性结果
+  files: {}  # 任务名 -> 评分表 JSON 路径；运行 rubric 前必须填写

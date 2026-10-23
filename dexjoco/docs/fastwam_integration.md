@@ -12,6 +12,8 @@ FastWAM 官方模型、注意力、flow matching 损失、训练器保持原样�
 |---|---|
 | `configs/task_groups/*.yaml` | 复用现有任务成员、指令、相机映射、训练 episode 选择 |
 | `configs/experiments/fastwam_single.yaml` | 八卡单臂六任务联合训练配方，默认 30,000 步 |
+| `configs/experiments/fastwam_single_rand_full.yaml` | 八卡单臂六任务 rand_full，每卡 batch 24，全局 192 |
+| `configs/experiments/fastwam_dual_rand_full.yaml` | 八卡双臂五任务 rand_full，每卡 batch 16，全局 128 |
 | `configs/experiments/fastwam_smoke.yaml` | 四卡真实数据短跑，20 步，每 10 步保存/验证 |
 | `scripts/train_fastwam_group.py` | 解析任务组，检查数据，写运行快照，启动官方训练 |
 | `fastwam/configs/data/dexjoco_*.yaml` | 单／双臂维度与序列适配器配置 |
@@ -73,6 +75,16 @@ source "$HOME/.config/physwam/fastwam-env.sh"
 `fastwam/checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt`。
 安装器不下载数据/模型、不初始化骨干，不执行训练；后续 initialize/train 会按需下载组件。
 安装阶段不修改 NVIDIA 驱动或系统 CUDA；完整模型的显存和 DeepSpeed 运行链路需服务器 smoke 验证。
+安装器单独从 PyTorch CPU 软件源固定安装 `torchcodec==0.4.0`，保留 CUDA 版 PyTorch。
+DexJoCo 数据适配器使用 `video_backend="pyav"`，不依赖 TorchCodec 的 GPU 解码。
+若旧安装选中了 `torchcodec-0.4.0+cu128` 并报 `libnppicc.so.12` 缺失，在 FastWAM 环境中执行：
+
+```bash
+python -m pip install --force-reinstall --no-deps torchcodec==0.4.0 \
+  --index-url https://download.pytorch.org/whl/cpu
+```
+
+随后重新执行 CPU/GPU 环境检查；不需要因此升级 Torch 或更改系统驱动。
 默认 batch=1 是每个设备的 batch，
 不是显存容量保证。有效全局 batch 还要乘 GPU 数量与梯度累积次数。
 `fastwam` 环境使用 on-the-fly T5 编码，第一版不需要预生成文本缓存。
@@ -81,6 +93,29 @@ source "$HOME/.config/physwam/fastwam-env.sh"
 仿真端使用现有 `dexjoco` 环境，需 `openpi-client`、`websockets`、`msgpack` 等现有传输依赖。
 源码运行脚本会把新 package 加入 PYTHONPATH；需要控制台入口时重新执行
 `python -m pip install -e ./dexjoco`，之后可运行 `dexjoco-fastwam-eval --help`。
+
+## rand_full 训练配置
+
+单臂、双臂分别显式选择 `fastwam_single_rand_full.yaml`、`fastwam_dual_rand_full.yaml`。
+两份配置沿用各自现有 rand_obj 配方的训练数值，默认八卡、30,000 步、10% episode 留出验证。
+`data_regime: rand_full` 自动使用 `datasets/dexjoco_lerobot_datasets_rand_full`，
+把所有任务的主视角映射为 `random_camera`，保持腕部相机和机器人维度不变，
+并保存 `configs/rand_full/` 对应的评测环境。此选择读取真实随机化示范数据，不等同于在线图像增强。
+YAML 的 `dataset_root` 可覆盖默认目录，命令行 `--dataset-root` 优先级最高。
+
+```bash
+# 在 dexjoco/ 下执行；将 single 换成 dual 可启动双臂全部任务。
+python scripts/train_fastwam_group.py \
+  --experiment configs/experiments/fastwam_single_rand_full.yaml \
+  --run-name fastwam_single_rand_full_8h100 \
+  --stage prepare
+```
+
+按同一组参数依次执行 `--stage inspect` 和 `--stage train`；
+若 ActionDiT 初始化文件还不存在，先执行 `--stage initialize`。
+rand_full 必须使用新 run，不能用它完整恢复 rand_obj run 的优化器、数据划分和统计。
+新 rand_full run 的 FastWAM 评测默认启用完整环境随机化；旧 run 保持原先的默认行为，
+仍可显式传入 `--rand-full`。
 
 ## 训练配方与启动优先级
 

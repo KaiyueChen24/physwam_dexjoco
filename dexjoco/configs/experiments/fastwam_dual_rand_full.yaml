@@ -1,0 +1,53 @@
+# FastWAM 双臂全部 5 个任务的 rand_full 联合训练：共享一个语言条件 policy。
+# 入口：scripts/train_fastwam_group.py --experiment configs/experiments/fastwam_dual_rand_full.yaml
+# 使用 rand_full 示范数据及 random_camera 主视角；不是对 rand_obj 图像做在线增强。
+# 创建独立 run、验证划分和归一化资产；不能作为原 rand_obj run 的完整状态续训配置。
+
+# 【配置与数据随机化】
+schema_version: 1
+model: fastwam
+data_regime: rand_full                 # 切换数据目录、主相机及保存的评测环境。
+dataset_root: null                     # 默认 datasets/dexjoco_lerobot_datasets_rand_full；CLI --dataset-root 优先。
+
+# 【任务选择与 GPU】
+group: dual_arm
+tasks: null                           # 使用该组全部 5 个任务。
+gpus: "0,1,2,3,4,5,6,7"               # 八张 H100；--gpus 可覆盖。
+
+# 【模型序列与图像】
+action_horizon: 32
+video_stride: 4                       # 每个样本共 9 帧。
+control_hz: 30
+image_size: [224, 224]                # 每相机尺寸；base=random_camera、wrist_left/wrist_right；拼为 224×672。
+sampling: task_balanced
+
+# 【训练与优化：沿用当前 fastwam_dual.yaml 的数值】
+batch_size: 16                        # 每卡 16；八卡、累积 1 时全局 batch=128。
+gradient_accumulation_steps: 1
+num_workers: 4                        # 每训练进程 4 个 worker，八卡共 32 个。
+max_steps: 30000                      # 总更新步数；首次训练预算，需按验证和闭环结果选择 checkpoint。
+learning_rate: 0.0001                 # 预热总更新步数的 5%，随后余弦衰减。
+weight_decay: 0.01
+seed: 42
+
+# 【精度与显存】
+mixed_precision: bf16
+gradient_checkpointing: true
+
+# 【日志与保存】
+save_every: 1000
+log_every: 10
+wandb_enabled: true
+wandb_name: fastwam_dual_rand_full    # 改成 null 时跟随 --run-name。
+
+# 【部署与闭环评测】
+execute_steps: 8
+num_inference_steps: 10
+sigma_shift: 1.0
+
+# 【留出验证：仅计算 loss】
+validation_ratio: 0.1                 # 每任务按完整 episode 留出 10%。
+validation_seed: 42
+validation_interval: 1000
+validation_batch_size: 8              # 每卡验证 batch。
+validation_max_batches: 20            # 每任务最多 20 个全局验证批次。

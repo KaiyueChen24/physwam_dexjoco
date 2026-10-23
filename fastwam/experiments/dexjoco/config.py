@@ -23,7 +23,9 @@ def signature(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def select_group(dexjoco_root, group_name, task_names=None, dataset_root=None):
+def select_group(dexjoco_root, group_name, task_names=None, dataset_root=None, *, data_regime="rand_obj"):
+    if data_regime not in ("rand_obj", "rand_full"):
+        raise ValueError("data_regime must be rand_obj or rand_full")
     root = Path(dexjoco_root).resolve()
     group = read_yaml(root / "configs/task_groups" / f"{group_name}.yaml")
     expected = {"single_arm": (23, 22, ["base", "wrist"]),
@@ -34,6 +36,13 @@ def select_group(dexjoco_root, group_name, task_names=None, dataset_root=None):
     group = copy.deepcopy(group)
     # model_action_dim in existing groups is specific to pi05, not a FastWAM setting.
     group["model_action_dim"] = action_dim
+    if data_regime == "rand_full":
+        # Keep absent/default rand_obj snapshots byte-for-byte compatible.
+        group["data_regime"] = data_regime
+        group["dataset_root"] = "datasets/dexjoco_lerobot_datasets_rand_full"
+        for task in group["tasks"]:
+            task["cameras"]["base"] = "random_camera"
+            task["eval_config"] = f"configs/rand_full/{task['name']}.yaml"
     base = Path(dataset_root or group["dataset_root"]).expanduser()
     base = base.resolve() if base.is_absolute() else (root / base).resolve()
     tasks = group["tasks"]
@@ -66,8 +75,10 @@ def select_group(dexjoco_root, group_name, task_names=None, dataset_root=None):
 def build_config(dexjoco_root, group_name, experiment, run_name, *, task_names=None, dataset_root=None):
     if not run_name or Path(run_name).name != run_name or run_name in (".", ".."):
         raise ValueError("run-name must be a simple directory name")
-    group = select_group(dexjoco_root, group_name, task_names, dataset_root)
     exp = copy.deepcopy(experiment)
+    group = select_group(dexjoco_root, group_name, task_names,
+                         dataset_root or exp.get("dataset_root"),
+                         data_regime=exp.get("data_regime", "rand_obj"))
     for key in ("action_horizon", "video_stride", "control_hz", "batch_size", "max_steps", "learning_rate",
                 "gradient_accumulation_steps", "num_inference_steps", "execute_steps", "save_every", "sigma_shift"):
         if not isinstance(exp[key], (int, float)) or exp[key] <= 0:

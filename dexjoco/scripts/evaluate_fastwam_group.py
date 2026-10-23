@@ -33,7 +33,8 @@ def main():
                         help="[评测/录制] 关闭 MP4 录制以诊断渲染故障；仍渲染策略观测并保存指标。")
     parser.add_argument("--resize-before-send", action="store_true",
                         help="[评测/传输] 在本地按模型尺寸缩放后发送 RGB 图像，减少远程推理流量；录像保持原尺寸。")
-    parser.add_argument("--rand-full", action="store_true", help='[闭环评测] 启用环境的完整视觉/场景随机化；不改变训练数据。')
+    parser.add_argument("--rand-full", action="store_true", default=None,
+                        help='[闭环评测] 启用完整视觉/场景随机化；默认跟随训练快照的 data_regime，不改变训练数据。')
     parser.add_argument("--timeout", type=float, default=86400, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
@@ -43,6 +44,8 @@ def main():
     run_dir, config = read_run(args.run_dir)
     group = config["framework"]["group"]
     exp = config["framework"]["experiment"]
+    if args.rand_full is None:
+        args.rand_full = group.get("data_regime", exp.get("data_regime", "rand_obj")) == "rand_full"
     if (min(args.episodes, args.max_steps, args.timeout) <= 0 or len(args.seeds) != len(set(args.seeds))
             or Path(args.evaluation_name).name != args.evaluation_name or args.evaluation_name in (".", "..")):
         parser.error("Invalid episode/step/timeout/seed/evaluation-name settings")
@@ -56,7 +59,8 @@ def main():
     if args.dry_run:
         print(json.dumps({"jobs": jobs, "execute_steps": steps, "action_horizon": exp["action_horizon"],
                           "gl_backend": args.gl_backend, "record_video": not args.no_video,
-                          "resize_before_send": args.resize_before_send}, indent=2))
+                          "resize_before_send": args.resize_before_send,
+                          "rand_full": args.rand_full}, indent=2))
         return
     from openpi_client import msgpack_numpy
     from websockets.sync.client import connect

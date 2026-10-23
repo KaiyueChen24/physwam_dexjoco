@@ -21,6 +21,35 @@ Captioner 与 TempSeg 两个仓库的 `batch_utils/` 在本次下载中逐文件
 
 允许通过 `rewarder.model_path` 使用本地权重目录；该目录身份由使用者负责，run.json 会记录实际路径，不能把它自动称作已校验的官方固定权重。Data Engine 保留官方模型 manifest 与 FP32 精确值检查。
 
+## 本地代码的编写依据与取舍
+
+这套工作区代码是对固定版本官方推理程序的 DexJoCo 接入，不是重新实现模型、训练算法或论文实验。官方实现保存在 `vendor/`；新写的 `physwam_flora/` 负责输入转换、运行编排和结果对照。
+
+| 本地模块 | 直接依据 | 本地新增的职责或约束 |
+|---|---|---|
+| `datasets.py` | `dexjoco/configs/task_groups/*.yaml` 的任务指令/相机映射，LeRobot 元数据，FastWAM 的录像与评测记录格式 | 将 episode 转成统一清单；v3 共享视频提取单条片段；示范数据不自动赋成功标签 |
+| `media.py` | 官方 Data Engine `api.py` / `media.py` 的文件、时长及同步契约，Rewarder 按帧索引处理时间的方式 | 模型加载前检查视频；本地统一要求 CFR 是适配器额外约束，不是所有官方模式都要求 CFR |
+| `jobs.py` | 官方 Rewarder `engine.py` / `core.py` 的 JSONL 字段，Data Engine `cli.py` / `api.py` 的输入字段 | 将主视角、腕视角映射到官方接口，单独存放成功标签，显式读取任务评分表 |
+| `runner.py` | 官方三个 `*_reward.py` CLI，以及 Data Engine `python -m batch_utils` 入口 | 独立解释器、工作目录与 GPU 可见性，固定版本，保存命令和配置，检查输出完整性 |
+| `evaluation.py` | 官方 terminal 输出分数和 dense 的 `valid` 字段，以及本地真实成功标签 | 计算混淆矩阵、AUROC 等离线指标；这些不是官方论文评测脚本，阈值须明确记录 |
+| `scripts/` | 两套官方 `requirements.txt`、模型清单与仓库 revision | 安装隔离环境、下载指定版本；不安装策略训练环境 |
+
+配置 YAML 是**本地包装器的格式**，不是官方提供的 DexJoCo 配置。下面的区别影响如何理解“复现”：
+
+| 设置 | 当前本地值/行为 | 固定版官方依据与区别 |
+|---|---|---|
+| `rewarder.max_num_seqs` | `1`，初跑控制并发 | `engine.py` 公共默认为 `8` |
+| `rewarder.gpu_memory_utilization` | 各阶段统一 `0.85` | 公共默认 `0.88`；rubric 入口覆盖为 `0.85` |
+| `rewarder.with_rationale` | `true`，便于检查评分依据 | 官方 CLI 默认不开启；开启会改变提示词和输出格式，不只是多保存一个字段 |
+| `caption.include_audit` | `true`，保留时序与输入记录 | 官方 CLI 默认不开启；控制是否保留结果中的 `pipeline` 字段 |
+| `caption.profile` / `views` | `dex`；单臂主视角、双臂三视角 | 官方支持这些模式；选择它们适配 DexJoCo 是本地假设，尚未验证域迁移效果 |
+| `source.limit_per_task` | 示范 `5`、rollout `20`，按编号升序取前若干条 | 本地试跑选择，无官方对应参数；不构成随机抽样或完整 benchmark |
+| TP / rubric 候选数 | terminal/dense `1`、rubric `2`；候选数 `9` | 沿用对应官方入口默认值 |
+
+采样帧数、上下文长度、生成温度等未在本地 YAML 暴露的参数沿用固定版上游实现。不能随意向 YAML 加键就认为已修改官方行为，应先检查 `runner.py` 是否读取并传参。
+
+`verify-sources` 检查本地 vendor 文件是否与 `sources.lock.json` 的哈希一致；它不验证用户自选权重，也不证明 GPU 推理正确。配置注释说明的是代码当前行为，不代表已在新服务器上实测成功。
+
 ## Rewarder 调用链
 
 入口：`terminal_reward.py` / `dense_reward.py` / `rubric_reward.py`。

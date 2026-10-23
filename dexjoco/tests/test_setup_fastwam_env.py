@@ -108,6 +108,17 @@ def test_install_order_cpu_default_and_independent_settings(setup_env):
     assert "deepspeed==0.18.7" in installs[2]["args"]
     assert "--no-build-isolation" in installs[2]["args"] and installs[2]["ds_ops"] == "0"
     assert "openpi-client" in " ".join(installs[3]["args"])
+    # Keep CPU video decoding independent of host CUDA/NPP availability. The
+    # dedicated CPU index and --no-deps must preserve the CUDA Torch installation.
+    codec_installs = [e for e in installs if "torchcodec==0.4.0" in e["args"]]
+    assert len(codec_installs) == 1
+    codec_args = codec_installs[0]["args"]
+    assert codec_args[codec_args.index("--index-url") + 1] == "https://download.pytorch.org/whl/cpu"
+    assert "--extra-index-url" not in codec_args
+    assert "--force-reinstall" in codec_args and "--no-deps" in codec_args
+    assert events.index(installs[3]) < events.index(codec_installs[0])
+    pip_check = next(e for e in events if e["args"][-3:] == ["-m", "pip", "check"])
+    assert events.index(codec_installs[0]) < events.index(pip_check)
     assert not any("jax" in " ".join(e["args"]).lower() for e in installs)
     checks = [e for e in events if any(a.endswith("check_fastwam_env.py") for a in e["args"])]
     assert len(checks) == 1 and "cpu" in checks[0]["args"] and checks[0]["offline"] == "1"

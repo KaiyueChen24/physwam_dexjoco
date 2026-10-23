@@ -1,32 +1,43 @@
-# 所有配置路径相对 physwam 根目录，不随启动 cwd 改变。
-schema_version: 1
-task_group: dexjoco/configs/task_groups/single_arm.yaml
-tasks: [pick_bucket]
+# 相对路径以 physwam 为根目录；详细说明见 flora/docs/upstream_audit.md。
+
+schema_version: 1  # 配置格式版本
+task_group: dexjoco/configs/task_groups/single_arm.yaml  # 任务组：提供任务指令和相机映射
+tasks: [pick_bucket]  # 要评估的任务；null 表示全部任务
+
+# 数据准备
 source:
-  kind: lerobot
-  root: dexjoco/datasets/dexjoco_lerobot_datasets
-  episodes: null
-  limit_per_task: 5
+  kind: lerobot  # lerobot：示范数据；rollout：评测录像；manifest：已有清单
+  root: dexjoco/datasets/dexjoco_lerobot_datasets  # 数据集父目录
+  episodes: null  # 指定 episode 编号列表；null 表示不筛选
+  limit_per_task: 5  # 每个任务按编号取前 N 条；null 表示不限
+
+# 运行环境
 runtime:
-  gpus: "0"
-  rewarder_python: flora/.venv-rewarder/bin/python
-  captioner_python: flora/.venv-captioner/bin/python
-  hf_home: flora/models/huggingface
-  model_cache: flora/models/data_engine
+  gpus: "0"  # GPU 编号，如 "2,3"；命令行 --gpus 可覆盖
+  rewarder_python: flora/.venv-rewarder/bin/python  # Rewarder 环境的 Python 路径
+  captioner_python: flora/.venv-captioner/bin/python  # TempSeg / Captioner 环境的 Python 路径
+  hf_home: flora/models/huggingface  # Hugging Face 缓存目录
+  model_cache: flora/models/data_engine  # TempSeg / Captioner 模型缓存目录
+
+# 视频评分：terminal / dense / rubric
 rewarder:
-  tensor_parallel_size: 1
-  rubric_tensor_parallel_size: 2
-  max_num_seqs: 1
-  gpu_memory_utilization: 0.85
-  with_rationale: true
-  frame_scores: false
-  seed: 0
+  tensor_parallel_size: 1  # terminal / dense 使用的张量并行卡数
+  rubric_tensor_parallel_size: 2  # rubric 张量并行卡数；需提供足够的可见 GPU
+  max_num_seqs: 1  # 最大并发序列数
+  gpu_memory_utilization: 0.85  # vLLM 每卡显存预算比例，范围 (0, 1)
+  with_rationale: true  # terminal 是否生成评分理由
+  frame_scores: false  # dense 是否额外输出映射到原视频各帧的分数
+  seed: 0  # 推理随机种子
+
+# 视频标注：TempSeg 分段 → Captioner 描述
 caption:
-  profile: dex        # 官方 Dex profile 是输入处理配置，不代表已针对 DexJoCo 验证。
-  views: main        # 单臂两视角：Captioner 用主相机；Rewarder 仍用 base+wrist。
-  yam32: false
-  include_audit: true
+  profile: dex  # 输入处理模式：human / dex / yam / tianji
+  views: main  # main：主视角；three：主视角和双腕；auto：自动选择
+  yam32: false  # 启用 YAM 三视角的 32 秒模式；dex 保持 false
+  include_audit: true  # 保存时序和模型输入的调试记录
+
+# 按任务评分表评估
 rubric:
-  num_samples: 9      # 保留官方发布代码默认值；快速试跑可设 1，并在比较时注明。
-  keep_thinking: false
-  files: {}          # 任务名 -> 自定义评分 JSON；未配置时拒绝 rubric 推理。
+  num_samples: 9  # 每条视频生成的候选回答数，再选代表性结果
+  keep_thinking: false  # 保存模型生成的推理文本
+  files: {}  # 任务名 -> 评分表 JSON 路径；运行 rubric 前必须填写

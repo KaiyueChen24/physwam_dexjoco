@@ -197,6 +197,12 @@ run_python -m pip install -c "$CONSTRAINTS" \
     -e "$FASTWAM_ROOT" -e "$DEX_ROOT/openpi/packages/openpi-client" \
     pyyaml websockets msgpack pytest \
     --extra-index-url https://download.pytorch.org/whl/cu128
+# DexJoCo reads videos with PyAV on CPU. The CUDA extra index above can select
+# torchcodec +cu128, which additionally requires system NPP/NVDEC libraries.
+# Explicitly select the CPU wheel without replacing CUDA Torch or its dependencies.
+STEP='安装 CPU 版 TorchCodec'
+run_python -m pip install -c "$CONSTRAINTS" --force-reinstall --no-deps \
+    torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cpu
 STEP='pip check'
 run_python -m pip check
 

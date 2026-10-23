@@ -76,6 +76,9 @@ def evaluation(monkeypatch, tmp_path, request):
     execute.exit_code = 0
     execute.commands = []
     execute.kind = request.param
+    if request.param == "fastwam":
+        execute.config = config
+        execute.metadata = metadata
     return execute, tmp_path / "evaluation/backend_test", calls
 
 
@@ -209,3 +212,22 @@ def test_fastwam_summary_rejects_mixed_recording_settings(evaluation):
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="video recording setting does not match"):
         summarize(directory)
+
+
+def test_fastwam_rand_full_snapshot_enables_environment_randomization(evaluation):
+    execute, directory, _ = evaluation
+    if execute.kind != "fastwam":
+        pytest.skip("FastWAM snapshot contract")
+    from experiments.dexjoco.config import signature
+    execute.config["framework"]["experiment"]["data_regime"] = "rand_full"
+    task = execute.config["framework"]["group"]["tasks"][0]
+    task["cameras"]["base"] = "random_camera"
+    task["environment"]["camera_mapping"] = task["cameras"]
+    execute.metadata["config_signature"] = signature(execute.config)
+    execute("egl", no_video=True, resize_before_send=True)
+    assert "--rand-full" in execute.commands[0]
+    assert json.loads((directory / "plan.json").read_text())["rand_full"] is True
+    environment = Path(execute.commands[0][execute.commands[0].index("--config") + 1])
+    import yaml
+    assert yaml.safe_load(environment.read_text())["camera_mapping"]["base"] == "random_camera"
+    assert summarize(directory)["data_regime"] == "rand_full"

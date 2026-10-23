@@ -336,6 +336,30 @@ python scripts/summarize_results.py \
 已有完成 job 跳过；失败 job 需 `--retry-failed`。缺失 job 不报告完整任务均值。
 控制 hz 按示范标注及环境 step 接口定义；无需修改 MuJoCo 内部 physics_dt。
 
+### 本地仿真与远程策略服务的图像传输
+
+本地通过 SSH 隧道连接服务器策略时，给 `evaluate_fastwam_group.py` 追加
+`--resize-before-send`，在发送前复用 FastWAM 的双线性缩放和居中补边处理。
+尺寸来自策略服务的 `image_size` 元数据；发送格式仍是 RGB uint8，不使用 JPEG 有损压缩。
+例如两张 640×640 图像缩放为 224×224 后，请求图像数据从约 2.46 MB 降为 0.30 MB。
+服务器无需升级或重启，仍使用现有预处理和策略接口；本地原始观测与录制视频分辨率不变。
+
+```bash
+python scripts/evaluate_fastwam_group.py \
+  --run-dir runs/fastwam_single_all_8h100_v3 \
+  --host 127.0.0.1 --port 18002 --tasks water_plant \
+  --seeds 0 --episodes 2 --gl-backend egl --resize-before-send \
+  --evaluation-name remote_policy_local_egl_resized_smoke
+```
+
+默认不启用，以兼容旧评测。切换该开关必须使用新的 `evaluation-name`，
+`plan.json` 与逐任务结果记录 `resize_before_send`，`latency.jsonl` 新增 `request_bytes`。
+此处的往返计时包含客户端缩放和序列化，可直接与旧日志对比；实际加速仍需网络实测。
+客户端 WebSocket 心跳等待设为 180 秒，容忍 SSH 链路的短暂延迟；
+每次推理仍有独立的 180 秒接收超时，连接故障不会被记为任务失败回合。
+直接调用 `dexjoco-fastwam-eval` 时也可使用该开关；源码不在默认同级位置时，
+同时传 `--fastwam-root /path/to/fastwam`。不需要在本地安装完整 FastWAM 训练环境。
+
 ### 保留 EGL 抓取原生调用栈
 
 EGL 简单场景与保持姿态测试通过，完整策略评测仍在 `mjr_readPixels` 中止时，

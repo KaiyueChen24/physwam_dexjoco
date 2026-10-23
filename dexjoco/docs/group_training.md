@@ -384,3 +384,47 @@ ROS 的 pytest 自动插件可能与 Conda Python 不兼容，因此关闭无关
 FastWAM 使用同一任务组和独立训练／推理入口，单臂动作直接使用 22 维。
 完整框架、环境与命令见 [FastWAM 接入说明](fastwam_integration.md)。
 本页的 train_pi05_group.py、serve_group.py、evaluate_group.py 继续专用于 π0.5。
+
+## rand_full 多任务全参数训练
+
+共维护四个策略：单臂 rand_obj、双臂 rand_obj、单臂 rand_full、双臂 rand_full。
+rand_full 新配方为 `configs/experiments/pi05_single_rand_full.yaml` 与
+`configs/experiments/pi05_dual_rand_full.yaml`；仍然每个任务组共享一个 policy。
+`data_regime: rand_full` 同时选择官方 `dexjoco_lerobot_datasets_rand_full` 数据目录、
+所有任务的 `random_camera` 主视角以及对应评测配置。修改评测目录名不能改变数据条件。
+`finetune_mode: full` 表示全参数更新，与数据条件中的 full 不是同一个参数。
+默认保留 10% 完整 episode 作为验证集，训练用 90%；不是把验证数据也用于优化。
+本配方延续已有八卡全局 batch 256 与单臂 20000 / 双臂 30000 步预算，是本项目的
+多任务全参数实验，不是官方逐任务 LoRA / batch 32 / 单臂 30000、双臂 60000 步的严格复现。
+
+在已配置好的 pi05 环境，从 dexjoco 目录运行：
+
+```bash
+# [数据/下载] 下载两组 rand_full 数据；固定已核对的官方数据版本。
+python scripts/prepare_group_data.py --group all --data-regime rand_full --data-only \
+  --data-revision 5a57c54e55dc5858dd9fb949c5f67c0c9716e6b3
+
+# [配置/预检] 无需数据、模型或 GPU，可先检查实际解析的目录与相机。
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_single_rand_full.yaml --dry-run
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_dual_rand_full.yaml --dry-run
+
+# [数据/预检] 每任务实际解码一批图像，检查维度、相机、prompt 与 episode 划分。
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_single_rand_full.yaml \
+  --run-name pi05_single_rand_full_v1 --stage prepare
+
+# [训练/启动] 使用相同 run-name，自动计算本实验训练集统计；不要使用 rand_obj 的 --resume。
+python scripts/train_pi05_group.py --experiment configs/experiments/pi05_single_rand_full.yaml \
+  --run-name pi05_single_rand_full_v1
+```
+
+双臂将上述实验文件和 run-name 替换成 `pi05_dual_rand_full.yaml`、
+`pi05_dual_rand_full_v1`。两个配置默认各用八卡，请分别运行；如同时训练，须分别覆盖
+`--gpus` 和 `--fsdp-devices`。数据在外部磁盘时，下载器的 `--output-dir` 是包含
+`dexjoco_lerobot_datasets_rand_full` 的父目录，而训练 `--dataset-root` 必须指向该子目录。
+下载来源写入独立 `download_manifest_rand_full.json`，不覆盖 rand_obj 的记录。
+新实验独立计算归一化统计；不要复制旧 run 的资产、优化器或验证划分。
+
+部署仍用 `serve_group.py`。批量评测现在默认继承训练快照的数据条件；也可以通过
+`evaluate_group.py --data-regime rand_full`（或 `--rand-full`）显式覆盖，进行跨条件测试。
+它会同步切换环境参数与相机，且把数据条件写入 plan、逐任务 result 和 summary，拒绝混合汇总。
+改变数据条件请使用新的 `--evaluation-name`。

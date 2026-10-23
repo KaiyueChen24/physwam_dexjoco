@@ -7,8 +7,8 @@ from PIL import Image
 PROMPT_TEMPLATE = "A video recorded from a robot's point of view executing the following instruction: {task}"
 
 
-def resize_rgb(image, size):
-    """RGB uint8 HWC -> CHW float32 [0,1], aspect-preserving, centered padding."""
+def resize_rgb_uint8(image, size):
+    """RGB uint8 HWC -> target-size uint8 HWC, with centered letterboxing."""
     image = np.asarray(image)
     if image.ndim != 3 or image.shape[-1] != 3 or image.dtype != np.uint8:
         raise ValueError(f"Expected uint8 RGB HWC image, got {image.shape}/{image.dtype}")
@@ -22,7 +22,12 @@ def resize_rgb(image, size):
     )
     canvas = Image.new("RGB", (width, height))
     canvas.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
-    return np.asarray(canvas).transpose(2, 0, 1).astype(np.float32) / 255.0
+    return np.asarray(canvas)
+
+
+def resize_rgb(image, size):
+    """RGB uint8 HWC -> CHW float32 [0,1], aspect-preserving, centered padding."""
+    return resize_rgb_uint8(image, size).transpose(2, 0, 1).astype(np.float32) / 255.0
 
 
 def pack_images(images, camera_order, size):

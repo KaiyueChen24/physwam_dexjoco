@@ -65,10 +65,12 @@ def evaluation(monkeypatch, tmp_path, request):
     monkeypatch.setattr(evaluator.subprocess, "Popen", Process)
     base_args = [evaluator.__file__, "--run-dir", str(tmp_path), "--seeds", "0", "--episodes", "2",
                  "--evaluation-name", "backend_test"]
-    def execute(backend, *, no_video=False):
+    def execute(backend, *, no_video=False, resize_before_send=False):
         argv = [*base_args, "--gl-backend", backend]
         if no_video:
             argv.append("--no-video")
+        if resize_before_send:
+            argv.append("--resize-before-send")
         monkeypatch.setattr(sys, "argv", argv)
         evaluator.main()
     execute.exit_code = 0
@@ -119,10 +121,38 @@ def test_legacy_egl_plans_still_resume(evaluation):
         data = json.loads(path.read_text())
         del data["gl_backend"]
         data.pop("record_video", None)
+        data.pop("resize_before_send", None)
         path.write_text(json.dumps(data))
     execute("egl")
     assert len(calls) == 1  # Legacy completed jobs are skipped, not rerun.
     assert summarize(directory)["gl_backend"] == "egl"
+
+
+def test_fastwam_resizing_reaches_child_and_preserves_original_recording(evaluation):
+    execute, directory, calls = evaluation
+    if execute.kind != "fastwam":
+        pytest.skip("FastWAM image transport option")
+    execute("egl", resize_before_send=True)
+    command = execute.commands[0]
+    assert "--resize-before-send" in command
+    assert Path(command[command.index("--fastwam-root") + 1]).resolve() == ROOT.parent / "fastwam"
+    assert "--no-video" not in command
+    plan = json.loads((directory / "plan.json").read_text())
+    result = json.loads((directory / "water_plant_seed0/result.json").read_text())
+    assert plan["resize_before_send"] is result["resize_before_send"] is True
+    assert plan["record_video"] is True
+    assert calls[0]["MUJOCO_GL"] == "egl"
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_fastwam_image_transport_cannot_change_under_same_evaluation_name(evaluation, initial):
+    execute, _, calls = evaluation
+    if execute.kind != "fastwam":
+        pytest.skip("FastWAM image transport option")
+    execute("egl", resize_before_send=initial)
+    with pytest.raises(ValueError, match="changed"):
+        execute("egl", resize_before_send=not initial)
+    assert len(calls) == 1
 
 
 def test_native_abort_after_one_success_is_incomplete_not_a_success_rate(evaluation):

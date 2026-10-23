@@ -13,7 +13,6 @@ model: fastwam                         #使用 FastWAM 官方训练器及 DexJoC
 group: single_arm                      # [任务] 默认单臂；命令行 --group 可覆盖。
 tasks: [water_plant]                   # [任务] 默认只训练浇水；改为其他任务列表或 null（整个任务组）。
 gpus: "0,1,2,3"                        # [GPU] 4 个可见 GPU 编号，启动 4 个训练进程；--gpus 可覆盖。
-# 每卡 batch 1 × 4 卡 × 累积 1 = 有效全局 batch 4；采用官方 ZeRO-1，无 CPU offload。
 
 # 【模型序列与图像】
 action_horizon: 32                     # [模型/动作序列] 一次预测 32 步；须能被 video_stride 整除，商须为 4 的倍数。

@@ -92,6 +92,33 @@ source "$HOME/.config/physwam/pi05-env.sh"
 
 ## 使用
 
+### 批量查看服务器使用情况
+
+在本机交互式终端运行（仅依赖 Python 3.8+ 和 OpenSSH 8.4+，远端为 Linux）：
+
+```bash
+python3 scripts/server_status.py
+```
+
+隐藏输入一次共用 SSH 密码后，并发查询 `112.192.23.232:61010–61018` 共 9 台服务器，
+显示 CPU、负载、内存、Swap、根目录与 `/dev/shm` 空间、各 GPU 利用率和显存、CPU 占用最高的进程。
+密码不写入脚本或文件，不作为命令行参数传递；临时密码提示程序在退出时删除。
+首次连接自动记录新主机密钥到本机 `known_hosts`，已有主机密钥发生变化时拒绝连接。
+GPU 指标依赖远端 `nvidia-smi`，未安装或驱动错误会显示提示。
+
+```bash
+# 每轮结束后等待 30 秒刷新，额外显示 GPU 计算进程；Ctrl+C 退出
+python3 scripts/server_status.py --interval 30 --processes
+
+# 只查第 1、2、9 台，额外查看 /aifs 所在文件系统，每台最多等待 40 秒
+python3 scripts/server_status.py --ports 61010 61011 61018 --disk-path /aifs --timeout 40
+```
+
+单台超时或认证失败不会影响其他服务器；一次性查询有失败时退出码为 1。
+CPU 使用率采样 1 秒，进程列表的 `%CPU` 是进程生命周期平均值，内存已用量按 `MemTotal - MemAvailable` 计算。
+
+### 运行实验
+
 现有命令仍从各组件目录运行，两个 Python 环境独立安装：
 
 ```bash

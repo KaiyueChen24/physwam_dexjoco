@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import random
+import sys
 import time
 
 import numpy as np
@@ -17,6 +18,16 @@ def validate_metadata(actual, expected):
             raise ValueError(f"Server mismatch: {key}")
     if actual["model"] != "fastwam":
         raise ValueError("Expected FastWAM policy")
+
+
+def resize_observation_images(observation, image_size):
+    """Prepare only the wire copy; simulator observations and video stay full size."""
+    from experiments.dexjoco.transforms import resize_rgb_uint8
+
+    return {**observation, "images": {
+        key: resize_rgb_uint8(image, image_size)
+        for key, image in observation["images"].items()
+    }}
 
 
 def execute_episode(env, infer, *, task, episode_id, horizon, action_dim, execute_steps, max_steps,
@@ -60,12 +71,23 @@ def main():
     parser.add_argument("--rand-full", action="store_true", help='[闭环评测] 启用环境的完整视觉/场景随机化；不改变训练数据。')
     parser.add_argument("--no-video", action="store_true",
                         help="[评测/录制] 关闭 MP4 录制；保留策略所需相机图像和指标输出。")
+    parser.add_argument("--resize-before-send", action="store_true",
+                        help="[评测/传输] 发送前按服务端 image_size 缩放 RGB 图像；保留原始分辨率录像。")
+    parser.add_argument("--fastwam-root", type=Path,
+                        help="[评测/传输] FastWAM 源码根目录，用于复用图像预处理；默认使用同级 fastwam/。")
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text())
     expected = json.loads(Path(args.metadata).read_text())
     horizon = expected["action_horizon"]
     if min(args.episodes, args.execute_steps, args.max_steps) <= 0 or args.execute_steps > horizon:
         parser.error("Episodes/execute-steps/max-steps must be positive; execute-steps <= horizon")
+    if args.resize_before_send:
+        fastwam_root = (args.fastwam_root or Path(__file__).resolve().parents[3] / "fastwam").expanduser().resolve()
+        if not (fastwam_root / "experiments/dexjoco/transforms.py").is_file():
+            parser.error("FastWAM image transforms are missing; set --fastwam-root")
+        sys.path.insert(0, str(fastwam_root))
+        # Load only NumPy/Pillow transforms, without the model or Torch/JAX stack.
+        from experiments.dexjoco.transforms import resize_rgb_uint8  # noqa: F401
     os.environ.setdefault("MUJOCO_GL", "egl")
     from openpi_client import msgpack_numpy
     from websockets.sync.client import connect
@@ -85,7 +107,10 @@ def main():
                            render_mode="rgb_array", password=config.get("password"))
     successes = 0
     try:
-        with connect(f"ws://{args.host}:{args.port}", open_timeout=15, compression=None, max_size=64 * 1024 * 1024) as socket:
+        # Allow brief SSH/network stalls without the default 20-second heartbeat abort.
+        # Each inference still has its own 180-second receive timeout.
+        with connect(f"ws://{args.host}:{args.port}", open_timeout=15, compression=None,
+                     ping_timeout=180, max_size=64 * 1024 * 1024) as socket:
             actual = msgpack_numpy.unpackb(socket.recv(timeout=15))
             validate_metadata(actual, expected)
             env.start()
@@ -102,16 +127,21 @@ def main():
                         writers[key].append_data(frame)
                 def infer(obs):
                     start = time.perf_counter()
-                    socket.send(packer.pack(obs))
+                    if args.resize_before_send:
+                        obs = resize_observation_images(obs, actual["image_size"])
+                    payload = packer.pack(obs)
+                    socket.send(payload)
                     value = socket.recv(timeout=180)
                     if isinstance(value, str):
                         raise RuntimeError(value)
                     result = msgpack_numpy.unpackb(value)
                     result["roundtrip_ms"] = (time.perf_counter() - start) * 1000
+                    result["request_bytes"] = len(payload)
                     return result
                 def log_infer(result, step):
                     entry = {"episode_id": episode, "timestamp": step,
                              "roundtrip_ms": result["roundtrip_ms"],
+                             "request_bytes": result["request_bytes"],
                              "server_infer_ms": result.get("server_timing", {}).get("infer_ms")}
                     with (target / "latency.jsonl").open("a") as stream:
                         stream.write(json.dumps(entry) + "\n")

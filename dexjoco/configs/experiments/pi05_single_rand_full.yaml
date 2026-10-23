@@ -1,0 +1,55 @@
+# rand_full 多任务全参数训练；与 rand_obj 实验分别保存策略、划分和归一化资产。
+# π0.5 单臂六任务 rand_full 全参数微调：通过 --experiment 显式选择本文件。
+# 优先级：已支持的命令行选项 > 本文件；任务、相机和维度见 configs/task_groups/。
+# 部署（serve）、闭环评测（eval）的命令行参数见 docs/configuration_guide.md。
+
+# 【配置格式 / config】
+schema_version: 1                       # [配置格式] 配置结构版本，目前仅接受 1。
+model: pi05                             # [模型] 使用 π0.5；当前入口仅支持 pi05。
+finetune_mode: full                     # [训练/更新范围] 全量更新视觉、语言、动作模块，不使用 LoRA。
+data_regime: rand_full                  # [数据/随机化] 使用官方 rand_full 数据，主视角为 random_camera。
+group: single_arm                       # [任务选择] 联合训练 single_arm.yaml 中全部六个任务，共享一个 rand_full 策略。
+
+# 【模型 / model】
+action_horizon: 30                      # [模型/动作序列] 一次预测 30 步动作，沿用 DexJoCo baseline。
+max_token_len: 250                      # [模型/文本] 任务指令与离散状态的 token 总长度上限；不含图像 token。
+
+# 【GPU 与并行 / gpu】
+gpus: "0,1,2,3,4,5,6,7"                 # [GPU/可见卡] 正式训练使用八张 H100；--gpus 可覆盖。
+fsdp_devices: 8                         # [GPU/参数分片] 八卡组成一个 FSDP 分片组；须整除可见卡数。
+
+# 【数据 / data】
+sampling: task_balanced                 # [数据/采样] 各任务等概率；frame_uniform 为各数据帧等概率。
+dataset_root: null                      # [数据/路径] null 自动使用 datasets/dexjoco_lerobot_datasets_rand_full；--dataset-root 可覆盖。
+video_backend: pyav                     # [数据/视频] LeRobot 视频解码后端。
+
+# 【归一化统计 / normalization】
+stats_samples: 50000                    # [归一化/抽样] 按任务混合分布有放回抽取的训练帧总数；单、双臂分别统计。
+stats_batch_size: 256                   # [归一化/CPU 批次] 每次累计的低维帧数；不解码视频，不是 GPU 训练 batch。
+
+# 【初始化权重 / initialization】
+checkpoint_paths:                       # [初始化/路径] 按 --group 选择；相对路径以 DexJoCo 仓库根目录为准。
+  single_arm: checkpoints/pi05_base/params                   # [初始化/单臂] 32 维动作模型，数据中的 22 维动作会补齐。
+  dual_arm: checkpoints/pi05_base_action_dim_44/params       # [初始化/双臂] 动作头扩展到 44 维的基础权重。
+
+# 【训练与优化 / train】
+seed: 42                                # [训练/随机性] 模型、数据采样与统计使用的随机种子。
+batch_size: 256                         # [训练/批次] 全局 batch 256，八卡每卡 32；是全参数多任务配方，并非官方逐任务 LoRA batch 32。
+num_workers: 32                         # [数据/CPU] 视频解码与预处理进程数；须结合可用 CPU 与实测吞吐调整。
+num_train_steps: 20000                  # [训练/预算] 参数更新总步数，不是 epoch；按验证 loss 与独立闭环评测选择 checkpoint。
+learning_rate: 5.0e-05                  # [训练/优化] 预热后的学习率；当前 Python 将衰减终点设为相同值。
+warmup_steps: 10000                     # [训练/预热] 前多少次更新逐渐提高学习率，之后维持 learning_rate。
+
+# 【日志与模型保存 / logging & checkpoint】
+wandb_enabled: true                     # [日志/在线记录] 启用 W&B；启动前在 pi05 环境执行 wandb login。
+wandb_project: physwam_dexjoco_rand_full          # [日志/项目] W&B 项目名；所属个人/团队由登录账号或 WANDB_ENTITY 指定。
+log_interval: 100                      # [日志/频率] 训练指标的记录间隔，单位为训练步。
+save_interval: 1000                     # [保存/频率] checkpoint 保存间隔；训练结束还会保存最终状态。
+keep_period: 1000                       # [保存/保留] 长期保留编号为此值倍数的 checkpoint，此外保留最新一个。
+
+# 【验证集 / validation：只计算 loss，不参与训练】
+validation_ratio: 0.1                   # [验证/划分] 每任务留出的完整 episode 比例；0 关闭，按数量向上取整且保留训练 episode。
+validation_seed: 42                     # [验证/随机性] episode 划分及验证噪声的固定种子，两种模型使用相同值可复用划分。
+validation_interval: 1000               # [验证/频率] 每多少次优化器更新计算一次；最后一步也计算。
+validation_batch_size: 32               # [验证/GPU 批次] 全局 32，八卡每卡 4；独立于训练 batch。
+validation_max_batches: 12              # [验证/预算] 每任务最多 12 批，即 384 帧；null 才遍历全部留出帧。

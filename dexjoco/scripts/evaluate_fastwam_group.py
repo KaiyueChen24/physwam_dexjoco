@@ -31,12 +31,14 @@ def main():
                         help="[评测/渲染] egl 使用 GPU；osmesa 使用 CPU 软件渲染，供 EGL 故障诊断。")
     parser.add_argument("--no-video", action="store_true",
                         help="[评测/录制] 关闭 MP4 录制以诊断渲染故障；仍渲染策略观测并保存指标。")
+    parser.add_argument("--resize-before-send", action="store_true",
+                        help="[评测/传输] 在本地按模型尺寸缩放后发送 RGB 图像，减少远程推理流量；录像保持原尺寸。")
     parser.add_argument("--rand-full", action="store_true", help='[闭环评测] 启用环境的完整视觉/场景随机化；不改变训练数据。')
     parser.add_argument("--timeout", type=float, default=86400, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
-    add_fastwam(args.fastwam_root)
+    fastwam_root = add_fastwam(args.fastwam_root)
     from experiments.dexjoco.config import read_run, signature
     run_dir, config = read_run(args.run_dir)
     group = config["framework"]["group"]
@@ -53,7 +55,8 @@ def main():
     jobs = [{"task": t["name"], "seed": seed, "episodes": args.episodes} for t in tasks for seed in args.seeds]
     if args.dry_run:
         print(json.dumps({"jobs": jobs, "execute_steps": steps, "action_horizon": exp["action_horizon"],
-                          "gl_backend": args.gl_backend, "record_video": not args.no_video}, indent=2))
+                          "gl_backend": args.gl_backend, "record_video": not args.no_video,
+                          "resize_before_send": args.resize_before_send}, indent=2))
         return
     from openpi_client import msgpack_numpy
     from websockets.sync.client import connect
@@ -68,12 +71,14 @@ def main():
     destination.mkdir(parents=True, exist_ok=True)
     plan = {"group": group["name"], "run_name": config["framework"]["run_name"], "server": metadata,
             "jobs": jobs, "execute_steps": steps, "max_steps": args.max_steps, "rand_full": args.rand_full,
-            "gl_backend": args.gl_backend, "record_video": not args.no_video}
+            "gl_backend": args.gl_backend, "record_video": not args.no_video,
+            "resize_before_send": args.resize_before_send}
     plan_path = destination / "plan.json"
     if plan_path.exists():
         old_plan = json.loads(plan_path.read_text())
         old_plan.setdefault("gl_backend", "egl")  # Legacy FastWAM evaluations always forced EGL.
         old_plan.setdefault("record_video", True)  # Legacy evaluations always recorded MP4s.
+        old_plan.setdefault("resize_before_send", False)  # Legacy clients sent the raw camera frames.
         if old_plan != plan:
             raise ValueError("Plan/checkpoint/settings/rendering backend changed; use a new evaluation-name")
     plan_path.write_text(json.dumps(plan, indent=2))
@@ -102,10 +107,13 @@ def main():
             command.append("--rand-full")
         if args.no_video:
             command.append("--no-video")
+        if args.resize_before_send:
+            command.extend(["--resize-before-send", "--fastwam-root", str(fastwam_root)])
         env = rendering_environment(args.gl_backend)
         env["PYTHONPATH"] = str(ROOT / "dexjoco") + os.pathsep + env.get("PYTHONPATH", "")
         result = {**job, "checkpoint": metadata["checkpoint"], "status": "failed", "command": command,
-                  "gl_backend": args.gl_backend, "record_video": not args.no_video}
+                  "gl_backend": args.gl_backend, "record_video": not args.no_video,
+                  "resize_before_send": args.resize_before_send}
         print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)
         try:
             with (attempt / "eval.log").open("w") as stream:

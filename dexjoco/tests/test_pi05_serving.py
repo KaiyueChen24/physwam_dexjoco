@@ -142,3 +142,69 @@ def test_inference_worker_isolates_parent_resources_and_keeps_ipc_across_episode
         for queue in (observations, actions):
             queue.cancel_join_thread()
             queue.close()
+
+
+@pytest.mark.parametrize("dual_arm,dimension", [(False, 22), (True, 44)])
+@pytest.mark.parametrize("old_timestamp", [0, 999])
+def test_late_previous_episode_chunk_is_discarded_before_timestamp_check(
+    evaluator, dual_arm, dimension, old_timestamp
+):
+    queue, buffer = Queue(), deque()
+    old = np.full((30, dimension), 50.0, dtype=np.float32)
+    current = np.zeros((30, dimension), dtype=np.float32)
+    queue.put(evaluator.ActionChunk(old, old_timestamp, episode_id=16))
+    queue.put(evaluator.ActionChunk(current, 0, episode_id=17))
+    evaluator.receive_actions(queue, buffer, 0, dual_arm, episode_id=17)
+    assert [action.timestamp for action in buffer] == list(range(30))
+    assert all(action.episode_id == 17 for action in buffer)
+    np.testing.assert_array_equal(np.stack([action.action for action in buffer]), current)
+
+
+def test_initial_wait_tolerates_delayed_old_response_after_pending_is_clear(evaluator):
+    queue, buffer = Queue(), deque()
+    worker = SimpleNamespace(is_alive=lambda: True)
+    event = threading.Event()  # Old request is complete, but its feeder is delayed.
+    actions = np.zeros((30, 22), dtype=np.float32)
+
+    def deliver():
+        time.sleep(0.03)
+        queue.put(evaluator.ActionChunk(actions + 50, 999, episode_id=16))
+        queue.put(evaluator.ActionChunk(actions, 0, episode_id=17))
+
+    producer = threading.Thread(target=deliver)
+    producer.start()
+    try:
+        evaluator._wait_for_inference(event, worker, timeout=1)
+        evaluator._wait_for_initial_actions(queue, buffer, worker, False, timeout=1, episode_id=17)
+    finally:
+        producer.join()
+    np.testing.assert_array_equal(np.stack([action.action for action in buffer]), actions)
+
+
+def test_current_episode_future_timestamp_still_rejected(evaluator):
+    queue = Queue()
+    queue.put(evaluator.ActionChunk(np.zeros((30, 22)), 1, episode_id=17))
+    with pytest.raises(AssertionError):
+        evaluator.receive_actions(queue, deque(), 0, False, episode_id=17)
+
+
+def test_worker_echoes_episode_id_to_actions_and_metrics(evaluator, monkeypatch, tmp_path):
+    observations, actions = Queue(), Queue()
+    stop, pending = threading.Event(), threading.Event()
+    pending.set()
+    observations.put(evaluator.Observation({"state": np.zeros(23)}, 4, episode_id=17))
+
+    class Client:
+        def infer(self, observation):
+            stop.set()
+            return {"actions": np.zeros((30, 22)), "server_timing": {"infer_ms": 1.0}}
+
+    monkeypatch.setattr(evaluator.websocket_client_policy, "WebsocketClientPolicy", lambda **kwargs: Client())
+    monkeypatch.setattr(evaluator.signal, "signal", lambda *args: None)
+    metrics = tmp_path / "latency.jsonl"
+    evaluator.inference_process(observations, actions, stop, 8000, pending, 0, "127.0.0.1", metrics)
+    chunk = actions.get_nowait()
+    assert (chunk.episode_id, chunk.timestamp) == (17, 4)
+    assert not pending.is_set()
+    import json
+    assert json.loads(metrics.read_text())["episode_id"] == 17

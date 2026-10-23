@@ -26,12 +26,14 @@ from .dexjoco_openpi_env import DexJoCoOpenPIEnv
 class Observation:
     obs: dict
     timestamp: int
+    episode_id: int = 0
 
 
 @dataclass
 class Action:
     action: np.ndarray
     timestamp: int
+    episode_id: int = 0
 
 
 ActionChunk = Action
@@ -126,14 +128,15 @@ def inference_process(
         inference_start = time.perf_counter()
         result = client.infer(obs.obs)
         if metrics_output is not None:
-            timing = {"timestamp": obs.timestamp,
+            timing = {"episode_id": obs.episode_id, "timestamp": obs.timestamp,
                       "roundtrip_ms": (time.perf_counter() - inference_start) * 1000,
                       "server_infer_ms": result.get("server_timing", {}).get("infer_ms")}
             with metrics_output.open("a") as metrics_file:
                 metrics_file.write(json.dumps(timing) + "\n")
         action_chunk = result["actions"]
 
-        action_queue.put(ActionChunk(action=action_chunk, timestamp=obs.timestamp))
+        action_queue.put(ActionChunk(action=action_chunk, timestamp=obs.timestamp,
+                                     episode_id=obs.episode_id))
         inferencing_event.clear()
 
 
@@ -156,6 +159,8 @@ def receive_actions(
     actions_buffer: deque,
     now_timestamp: int,
     dual_arm: bool,
+    *,
+    episode_id: int = 0,
 ):
     """Receive action chunks and merge them into a timestamped action buffer.
 
@@ -172,6 +177,13 @@ def receive_actions(
     while True:
         try:
             action_chunk: ActionChunk = action_queue.get_nowait()
+
+            # Queue.put() uses a background feeder: a completed old request may
+            # arrive after reset, even if its pending event is already clear.
+            # Check the episode before timestamps, including old timestamp=0.
+            if action_chunk.episode_id < episode_id:
+                continue
+            assert action_chunk.episode_id == episode_id, "Action belongs to a future episode"
 
             # Chunk timestamp comes from observation, so it should not exceed now_timestamp.
             assert action_chunk.timestamp <= now_timestamp
@@ -219,7 +231,8 @@ def receive_actions(
                     action[action_idx],
                     interp_t,
                 )
-                actions_buffer[buffer_idx] = Action(action=interp_action, timestamp=ts)
+                actions_buffer[buffer_idx] = Action(action=interp_action, timestamp=ts,
+                                                    episode_id=episode_id)
 
             # Append non-overlapping tail actions.
             non_overlap_timestamp_range = (
@@ -230,7 +243,8 @@ def receive_actions(
                 non_overlap_timestamp_range[0], non_overlap_timestamp_range[1]
             ):
                 action_idx = ts - action_chunk_timestamp_range[0]
-                actions_buffer.append(Action(action=action[action_idx], timestamp=ts))
+                actions_buffer.append(Action(action=action[action_idx], timestamp=ts,
+                                             episode_id=episode_id))
         except Empty:
             break
 
@@ -243,12 +257,13 @@ def _check_inference_worker(inference_proc):
         )
 
 
-def _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm, timeout=300.0):
+def _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm, timeout=300.0,
+                              *, episode_id=0):
     """Wait without advancing simulation time, including first-call JAX compilation."""
     deadline = time.monotonic() + timeout
     while not actions_buffer:
         _check_inference_worker(inference_proc)
-        receive_actions(action_queue, actions_buffer, 0, dual_arm)
+        receive_actions(action_queue, actions_buffer, 0, dual_arm, episode_id=episode_id)
         if actions_buffer:
             return
         if time.monotonic() >= deadline:
@@ -370,6 +385,7 @@ def main(
         port, seed, host, metrics_output
     )
     print("Inference worker start method: spawn (isolated from MuJoCo/EGL)", flush=True)
+    print("Inference episode isolation: episode_id", flush=True)
     video_writers = None
 
     try:
@@ -408,11 +424,12 @@ def main(
 
             # Send the first observation and mark inference as active before enqueueing it.
             inferencing_event.set()
-            obs_queue.put(Observation(env.get_obs(), timestamp))
+            obs_queue.put(Observation(env.get_obs(), timestamp, episode_id=ep))
 
             # Start the episode clock only after the first chunk is ready.
             print("Waiting for first policy actions (initial JAX compilation may take several minutes)...", flush=True)
-            _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm)
+            _wait_for_initial_actions(action_queue, actions_buffer, inference_proc, dual_arm,
+                                      episode_id=ep)
 
             # Save the reset frame.
             raw_images = env.get_raw_images()
@@ -426,7 +443,7 @@ def main(
             # Episode loop.
             while True:
                 _check_inference_worker(inference_proc)
-                receive_actions(action_queue, actions_buffer, timestamp, dual_arm)
+                receive_actions(action_queue, actions_buffer, timestamp, dual_arm, episode_id=ep)
 
                 # Execute the scheduled action for this timestamp, or hold the pose.
                 if actions_buffer:
@@ -459,7 +476,7 @@ def main(
 
                 if should_send_obs:
                     inferencing_event.set()
-                    obs_queue.put(Observation(env.get_obs(), timestamp))
+                    obs_queue.put(Observation(env.get_obs(), timestamp, episode_id=ep))
                     # inferencing_event is cleared in the inference process after inference finishes.
 
                 # Stop after the environment reports terminal state.
@@ -491,15 +508,11 @@ def main(
                 final_video_dir = output_dir / f"episode_{ep:02d}_{result_suffix}"
             video_dir.rename(final_video_dir)
 
-            # Drain in-flight work before starting the next episode.
-            while True:
-                try:
-                    obs_queue.get_nowait()
-                except Empty:
-                    break
+            # Let the worker finish any queued/in-flight request. The parent
+            # must not remove its observation while its pending event is set.
+            # Delayed responses are rejected by episode_id on the next read;
+            # Queue.empty() cannot establish an inter-process reset barrier.
             _wait_for_inference(inferencing_event, inference_proc)
-            while not action_queue.empty():
-                action_queue.get()
 
         print(
             f"\nSuccess rate: {num_success}/{episodes} ({100 * num_success / episodes:.1f}%)"

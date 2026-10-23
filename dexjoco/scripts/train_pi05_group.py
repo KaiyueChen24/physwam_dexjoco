@@ -16,6 +16,7 @@ def prepare_data(config, resolved, check_images=False):
 
     dataset = MultiTaskDataset(resolved["group"], config.model.action_horizon)
     manifest = {"group": resolved["group"]["name"], "data_source": "lerobot",
+                "data_regime": resolved["group"].get("data_regime", "rand_obj"),
                 "sampling": resolved["experiment"]["sampling"], "tasks": dataset.manifest,
                 "normalization": "seeded frame sampling using the training task mixture; training episodes only",
                 "data_split": resolved.get("data_split")}
@@ -25,7 +26,8 @@ def prepare_data(config, resolved, check_images=False):
             sample = dataset[offset]
             print(task["name"], "state", sample["observation.state"].shape,
                   "action", sample["action"].shape, "prompt", sample["prompt"], flush=True)
-    download_manifest = Path(resolved["group"]["dataset_root"]).parent / "download_manifest.json"
+    filename = "download_manifest_rand_full.json" if resolved["group"].get("data_regime") == "rand_full" else "download_manifest.json"
+    download_manifest = Path(resolved["group"]["dataset_root"]).parent / filename
     if download_manifest.exists():
         manifest["download_provenance"] = json.loads(download_manifest.read_text())
     (Path(resolved["run_dir"]) / "data_manifest.json").write_text(json.dumps(manifest, indent=2))

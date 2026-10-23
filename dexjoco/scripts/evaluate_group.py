@@ -65,6 +65,11 @@ def main():
     parser.add_argument("--timeout", type=float, default=7200, help='[闭环评测] 每个任务与 seed 组合的进程超时，单位秒。')
     parser.add_argument("--retry-failed", action="store_true", help='[闭环评测] 重跑已记录失败的评测任务；已完成任务继续跳过。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
+    randomization = parser.add_mutually_exclusive_group()
+    randomization.add_argument("--data-regime", choices=("rand_obj", "rand_full"),
+                               help="[评测/随机化] 默认沿用训练快照；可显式覆盖以做跨条件测试。")
+    randomization.add_argument("--rand-full", dest="data_regime", action="store_const", const="rand_full",
+                               help="[评测/随机化] 显式启用 rand_full，等同 --data-regime rand_full。")
     args = parser.parse_args()
     if args.episodes <= 0 or args.timeout <= 0 or len(args.seeds) != len(set(args.seeds)):
         parser.error("Episodes/timeout must be positive and seeds must be unique")
@@ -72,6 +77,10 @@ def main():
         parser.error("evaluation-name must be a simple directory name")
     resolved = read_run(args.run_dir)
     group = resolved["group"]
+    trained_regime = group.get("data_regime", resolved.get("experiment", {}).get("data_regime", "rand_obj"))
+    regime = args.data_regime or trained_regime
+    if regime not in ("rand_obj", "rand_full"):
+        raise ValueError("Unknown evaluation data regime")
     if args.group and args.group != group["name"]:
         parser.error("Requested group does not match training run")
     available = {t["name"] for t in group["tasks"]}
@@ -80,7 +89,7 @@ def main():
     tasks = [t for t in group["tasks"] if not args.tasks or t["name"] in args.tasks]
     jobs = [{"task": t["name"], "seed": s, "episodes": args.episodes} for t in tasks for s in args.seeds]
     if args.dry_run:
-        print(json.dumps({"group": group["name"], "gl_backend": args.gl_backend, "jobs": jobs}, indent=2))
+        print(json.dumps({"group": group["name"], "gl_backend": args.gl_backend, "data_regime": regime, "rand_full": regime == "rand_full", "jobs": jobs}, indent=2))
         return
     executable = shutil.which("dexjoco-openpi-eval")
     if not executable:
@@ -98,11 +107,14 @@ def main():
         raise ValueError("Synthetic/tiny checkpoints cannot be used for benchmark reporting")
     evaluation_dir = Path(resolved["run_dir"]) / "evaluation" / args.evaluation_name
     evaluation_dir.mkdir(parents=True, exist_ok=True)
-    plan = {"group": group["name"], "run_name": resolved["run_name"], "server": metadata, "jobs": jobs, "gl_backend": args.gl_backend}
+    plan = {"group": group["name"], "run_name": resolved["run_name"], "server": metadata, "jobs": jobs, "gl_backend": args.gl_backend, "data_regime": regime, "rand_full": regime == "rand_full"}
     plan_path = evaluation_dir / "plan.json"
     if plan_path.exists():
         old_plan = json.loads(plan_path.read_text())
         old_plan.setdefault("gl_backend", "egl")  # Legacy plans always forced EGL.
+        old_regime = old_plan.get("data_regime", "rand_full" if old_plan.get("rand_full") else "rand_obj")
+        old_plan.setdefault("data_regime", old_regime)
+        old_plan.setdefault("rand_full", old_regime == "rand_full")
         if old_plan != plan:
             raise ValueError("Evaluation plan/checkpoint/rendering backend changed; use a new evaluation-name")
     plan_path.write_text(json.dumps(plan, indent=2))
@@ -123,10 +135,16 @@ def main():
                 continue
         attempt = job_dir / f"attempt_{uuid.uuid4().hex[:8]}"
         attempt.mkdir()
-        evaluation_config = yaml.safe_load(repo_path(task["eval_config"]).read_text())
+        config_source = task["eval_config"] if regime == trained_regime else f"configs/{regime}/{task['name']}.yaml"
+        evaluation_config = yaml.safe_load(repo_path(config_source).read_text())
         if evaluation_config["env_name"] != task["name"] or evaluation_config["robot_type"] != group["robot_type"]:
             raise ValueError("Evaluation task/robot type does not match group")
-        evaluation_config["camera_mapping"] = task["cameras"]
+        if regime == trained_regime:
+            evaluation_config["camera_mapping"] = task["cameras"]
+        if set(evaluation_config["camera_mapping"]) != set(task["cameras"]):
+            raise ValueError("Evaluation camera keys do not match the policy")
+        if regime == "rand_full" and evaluation_config["camera_mapping"].get("base") != "random_camera":
+            raise ValueError("rand_full requires random_camera for the main view")
         evaluation_config["prompt"] = task["prompt"]
         config_path = attempt / "environment.yaml"
         config_path.write_text(yaml.safe_dump(evaluation_config, sort_keys=False))
@@ -136,7 +154,10 @@ def main():
                    "--seed", str(job["seed"]), "--episodes", str(args.episodes),
                    "--output", str(output), "--metrics-output", str(latency_path),
                    "--render-mode", "rgb_array"]
+        if regime == "rand_full":
+            command.append("--rand-full")
         result = {**job, "group": group["name"], "checkpoint": metadata["checkpoint"],
+                  "data_regime": regime, "rand_full": regime == "rand_full",
                   "data_source": "lerobot", "gl_backend": args.gl_backend,
                   "command": command, "output": str(output), "status": "failed"}
         print("Evaluate:", job, "log:", attempt / "eval.log", flush=True)

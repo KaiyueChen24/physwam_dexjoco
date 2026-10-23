@@ -1,8 +1,23 @@
 """Download only the chosen task group and its initialization weights."""
 import argparse
 import json
+from pathlib import Path
 
 from group_common import ROOT, load_group
+
+
+DATASET_DIRS = {"rand_obj": "dexjoco_lerobot_datasets", "rand_full": "dexjoco_lerobot_datasets_rand_full"}
+
+
+def build_plan(group_name, data_regime):
+    if data_regime not in DATASET_DIRS:
+        raise ValueError("Unknown data regime")
+    groups = [load_group(g, data_regime) for g in
+              (("single_arm", "dual_arm") if group_name == "all" else (group_name,))]
+    prefix = DATASET_DIRS[data_regime]
+    return groups, {"groups": [g["name"] for g in groups], "data_regime": data_regime,
+                    "data_patterns": [f"{prefix}/{task['dataset']}/*" for g in groups for task in g["tasks"]],
+                    "model_patterns": ["pi05_base/*" if g["name"] == "single_arm" else "pi05_base_action_dim_44/*" for g in groups]}
 
 
 def main():
@@ -10,15 +25,20 @@ def main():
     parser.add_argument("--group", choices=("single_arm", "dual_arm", "all"), default="all", help='[任务选择] 选择单臂或双臂任务组。')
     parser.add_argument("--data-revision", default="main", help='[数据与 CPU] Hugging Face 数据集分支、标签或 commit，下载时记录实际 revision。')
     parser.add_argument("--model-revision", default="main", help='[权重与结果保存] Hugging Face π0.5 模型分支、标签或 commit。')
+    parser.add_argument("--data-regime", choices=("rand_obj", "rand_full"), default="rand_obj",
+                        help="[数据/随机化] 选择对应的官方训练数据目录，默认 rand_obj。")
+    parser.add_argument("--output-dir", default=str(ROOT / "datasets"),
+                        help="[数据/保存] 下载父目录，内含所选数据条件的子目录；权重仍写入 checkpoints。")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--data-only", action="store_true", help='[数据与 CPU] 仅下载示范数据，不下载初始化权重。')
     mode.add_argument("--weights-only", action="store_true", help='[权重与结果保存] 仅下载 π0.5 初始化权重，不下载示范数据。')
     parser.add_argument("--dry-run", action="store_true", help='[配置与实验] 仅打印配置或计划，不启动训练、推理或评测。')
     args = parser.parse_args()
-    groups = [load_group(g) for g in (("single_arm", "dual_arm") if args.group == "all" else (args.group,))]
-    data_patterns = [f"dexjoco_lerobot_datasets/{task['dataset']}/*" for g in groups for task in g["tasks"]]
-    model_patterns = ["pi05_base/*" if g["name"] == "single_arm" else "pi05_base_action_dim_44/*" for g in groups]
-    plan = {"groups": [g["name"] for g in groups], "data_patterns": data_patterns, "model_patterns": model_patterns}
+    groups, plan = build_plan(args.group, args.data_regime)
+    data_patterns, model_patterns = plan["data_patterns"], plan["model_patterns"]
+    output = Path(args.output_dir).expanduser()
+    output = output.resolve() if output.is_absolute() else (ROOT / output).resolve()
+    plan["output_dir"] = str(output)
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return
@@ -29,9 +49,10 @@ def main():
         repository = "DexJoCo/DexJoCo-Datasets-LeRobot"
         revision = api.repo_info(repository, repo_type="dataset", revision=args.data_revision).sha
         snapshot_download(repository, repo_type="dataset", revision=revision, allow_patterns=data_patterns,
-                          local_dir=ROOT / "datasets")
-        path = ROOT / "datasets/download_manifest.json"
+                          local_dir=output)
+        path = output / ("download_manifest_rand_full.json" if args.data_regime == "rand_full" else "download_manifest.json")
         manifest = json.loads(path.read_text()) if path.exists() else {"tasks": {}}
+        manifest["data_regime"] = args.data_regime
         for group in groups:
             for task in group["tasks"]:
                 manifest["tasks"][task["name"]] = {"repo_id": repository, "revision": revision}

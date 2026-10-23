@@ -29,9 +29,17 @@ def read_yaml(path):
     return data
 
 
-def load_group(name):
+def load_group(name, data_regime="rand_obj"):
+    if data_regime not in ("rand_obj", "rand_full"):
+        raise ValueError("data_regime must be rand_obj or rand_full")
     path = repo_path(name if str(name).endswith(".yaml") else f"configs/task_groups/{name}.yaml")
     group = read_yaml(path)
+    if data_regime == "rand_full":
+        group["data_regime"] = "rand_full"
+        group["dataset_root"] = "datasets/dexjoco_lerobot_datasets_rand_full"
+        for task in group["tasks"]:
+            task["cameras"]["base"] = "random_camera"
+            task["eval_config"] = f"configs/rand_full/{task['name']}.yaml"
     dual = group["robot_type"] == "dual_arm"
     expected = (46, 44, 44) if dual else (23, 22, 32)
     if group["robot_type"] not in ("single_arm", "dual_arm"):
@@ -96,7 +104,7 @@ def resolve(args):
     group_name = args.group or experiment.get("group")
     if group_name not in ("single_arm", "dual_arm"):
         raise ValueError("Set group in the experiment YAML or pass --group single_arm/dual_arm")
-    group = load_group(group_name)
+    group = load_group(group_name, experiment.get("data_regime", "rand_obj"))
     gpus = args.gpus if args.gpus is not None else experiment.get("gpus", "0")
     if not isinstance(gpus, str):
         raise ValueError('gpus must be a quoted, comma-separated string, e.g. "0,1,2,3"')
@@ -134,7 +142,8 @@ def resolve(args):
             group[key] = experiment[key]
     checkpoint = args.checkpoint or experiment["checkpoint_paths"][group["name"]]
     experiment["initialization_params"] = str(repo_path(checkpoint))
-    run_name = args.run_name or f"pi05_{group_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    regime_suffix = "_rand_full" if experiment.get("data_regime") == "rand_full" else ""
+    run_name = args.run_name or f"pi05_{group_name}{regime_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     if Path(run_name).name != run_name or run_name in (".", ".."):
         raise ValueError("run-name must be a simple directory name")
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
@@ -204,7 +213,8 @@ def build_train_config(resolved, resume=False):
         policy_metadata={"group": group["name"], "robot_type": group["robot_type"],
                          "tasks": [t["name"] for t in group["tasks"]],
                          "data_source": "lerobot", "finetune_mode": mode,
-                         "action_horizon": exp["action_horizon"]},
+                         "action_horizon": exp["action_horizon"],
+                         **({"data_regime": group["data_regime"]} if "data_regime" in group else {})},
     )
 
 

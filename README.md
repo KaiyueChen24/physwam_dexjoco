@@ -1,15 +1,17 @@
 # PhysWAM
 
-DexJoCo 仿真、π0.5 基线与 FastWAM 训练／推理统一工作区。
-Git 仓库根目录为本目录；两个子目录是同一仓库中的源码组件。
+DexJoCo 仿真、π0.5 基线、FastWAM 训练／推理与 FLORA 离线视频标注统一工作区。
+Git 仓库根目录为本目录；各子目录是同一仓库中的源码组件。
 
 ```text
 physwam/
 ├── dexjoco/       # 仿真、任务配置、实验启动器与评测
-└── fastwam/       # FastWAM 模型、训练器与 DexJoCo 适配
+├── fastwam/       # FastWAM 模型、训练器与 DexJoCo 适配
+└── flora/         # 官方 FLORA 推理源码、DexJoCo 视频适配与离线评分
 ```
 
 - [FastWAM 接入与训练评测](dexjoco/docs/fastwam_integration.md)
+- [FLORA 离线推理与评测](flora/README.md) · [代码架构](flora/docs/architecture.md) · [官方源码审查](flora/docs/upstream_audit.md)
 - [π0.5 分组训练](dexjoco/docs/group_training.md)
 - [配置索引](dexjoco/docs/configuration_guide.md)
 - [DexJoCo 原项目说明](dexjoco/README.md)

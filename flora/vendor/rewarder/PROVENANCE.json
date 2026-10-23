@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "model": "Flora-rewarder-27B",
+  "selected_step": 1354,
+  "base_model": "Qwen/Qwen3.5-27B",
+  "base_revision": "fc05daec18b0a78c049392ed2e771dde82bdf654",
+  "format": "full model in sharded safetensors",
+  "checkpoint_storage_dtype": "BF16",
+  "source_weights_modified": false
+}

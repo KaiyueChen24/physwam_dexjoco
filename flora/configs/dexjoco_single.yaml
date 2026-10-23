@@ -1,0 +1,32 @@
+# 所有配置路径相对 physwam 根目录，不随启动 cwd 改变。
+schema_version: 1
+task_group: dexjoco/configs/task_groups/single_arm.yaml
+tasks: [pick_bucket]
+source:
+  kind: lerobot
+  root: dexjoco/datasets/dexjoco_lerobot_datasets
+  episodes: null
+  limit_per_task: 5
+runtime:
+  gpus: "0"
+  rewarder_python: flora/.venv-rewarder/bin/python
+  captioner_python: flora/.venv-captioner/bin/python
+  hf_home: flora/models/huggingface
+  model_cache: flora/models/data_engine
+rewarder:
+  tensor_parallel_size: 1
+  rubric_tensor_parallel_size: 2
+  max_num_seqs: 1
+  gpu_memory_utilization: 0.85
+  with_rationale: true
+  frame_scores: false
+  seed: 0
+caption:
+  profile: dex        # 官方 Dex profile 是输入处理配置，不代表已针对 DexJoCo 验证。
+  views: main        # 单臂两视角：Captioner 用主相机；Rewarder 仍用 base+wrist。
+  yam32: false
+  include_audit: true
+rubric:
+  num_samples: 9      # 保留官方发布代码默认值；快速试跑可设 1，并在比较时注明。
+  keep_thinking: false
+  files: {}          # 任务名 -> 自定义评分 JSON；未配置时拒绝 rubric 推理。

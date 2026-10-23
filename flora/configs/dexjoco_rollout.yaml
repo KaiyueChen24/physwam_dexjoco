@@ -1,0 +1,28 @@
+schema_version: 1
+task_group: dexjoco/configs/task_groups/single_arm.yaml
+tasks: [pick_bucket]
+source:
+  kind: rollout
+  root: null         # 必填：某次 FastWAM 评测 attempt 目录，或其 videos/ 目录。
+  episodes: null
+  limit_per_task: 20
+runtime:
+  gpus: "0"
+  rewarder_python: flora/.venv-rewarder/bin/python
+  captioner_python: flora/.venv-captioner/bin/python
+  hf_home: flora/models/huggingface
+  model_cache: flora/models/data_engine
+rewarder:
+  tensor_parallel_size: 1
+  rubric_tensor_parallel_size: 2
+  max_num_seqs: 1
+  gpu_memory_utilization: 0.85
+  with_rationale: true
+  seed: 0
+caption:
+  profile: dex
+  views: main
+  include_audit: true
+rubric:
+  num_samples: 9
+  files: {}

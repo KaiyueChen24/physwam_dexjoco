@@ -1,0 +1,31 @@
+schema_version: 1
+task_group: dexjoco/configs/task_groups/dual_arm.yaml
+tasks: [bimanual_assembly]
+source:
+  kind: lerobot
+  root: dexjoco/datasets/dexjoco_lerobot_datasets
+  episodes: null
+  limit_per_task: 5
+runtime:
+  gpus: "0"
+  rewarder_python: flora/.venv-rewarder/bin/python
+  captioner_python: flora/.venv-captioner/bin/python
+  hf_home: flora/models/huggingface
+  model_cache: flora/models/data_engine
+rewarder:
+  tensor_parallel_size: 1
+  rubric_tensor_parallel_size: 2
+  max_num_seqs: 1
+  gpu_memory_utilization: 0.85
+  with_rationale: true
+  frame_scores: false
+  seed: 0
+caption:
+  profile: dex
+  views: three
+  yam32: false
+  include_audit: true
+rubric:
+  num_samples: 9
+  keep_thinking: false
+  files: {}

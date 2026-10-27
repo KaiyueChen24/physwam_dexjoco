@@ -202,6 +202,52 @@ flora/.venv-rewarder/bin/python -m physwam_flora summarize \
 
 官方把无法解析的 dense 窗口回退为 normal，必须同时检查 `invalid_clips`。定位错误时间、解释是否正确仍需人工或额外事件真值。Dense 是利用后续画面的离线判断。
 
+## EgoDex 小样本下载计划
+
+[Apple 官方 EgoDex 仓库](https://github.com/apple-aiml-research/ml-egodex)提供 MP4 与同编号 HDF5 文件；最小的测试集 ZIP 约 16 GB。初步检查不需要完整下载，也不需要安装官方示例的 TorchCodec / 轨迹预测环境。
+
+`scripts/download_egodex.py` 使用 Python 标准库，以 HTTP Range 读取官方 ZIP 的目录及所选成员。默认随机种子为 0，每个任务固定抽取 3 段，任务如下：
+
+| 任务 | 关注内容 |
+| --- | --- |
+| `basic_pick_place` | 取放、动作起止 |
+| `pour` | 倾倒、容器与方向 |
+| `screw_unscrew_bottle_cap` | 旋拧、双手分工 |
+| `insert_remove_usb` | 插拔、小物体 |
+| `fold_unfold_paper_basic` | 折叠、连续操作 |
+| `tie_and_untie_shoelace` | 精细操作、遮挡 |
+| `assemble_disassemble_legos` | 装配、拆卸 |
+| `make_sandwich` | 多步骤操作 |
+
+已对照 Apple 实际 ZIP 索引确认：共 24 段 / 48 个配对文件，选中内容压缩后 113.14 MiB，提取后 125.66 MiB；另有少量 ZIP 索引和 HTTP 请求开销。不是先下载 16 GB 再筛选。服务器或代理若忽略 Range，脚本会报错，不会静默下载整包。
+
+从服务器的 physwam 根目录运行，先预览再下载：
+
+```bash
+python3 flora/scripts/download_egodex.py \
+  --output /aifs/chenkaiyue/datasets/egodex_subset
+
+python3 -u flora/scripts/download_egodex.py \
+  --output /aifs/chenkaiyue/datasets/egodex_subset --execute
+```
+
+无需 GPU 或新增 Python 依赖。下载会逐文件打印进度，校验 ZIP CRC32，保留原始 MP4/HDF5，并在全部成功后写出 `download_manifest.json`，记录 URL、ZIP ETag、所选文件、大小和校验值。中断后可重跑同一命令：已通过校验的完整文件会跳过，未完成的文件重新下载；不是单文件字节级断点续传。已有同名文件损坏时会停下，不静默覆盖。不要对同一输出目录同时运行多个下载进程。
+
+```text
+/aifs/chenkaiyue/datasets/egodex_subset/
+├── download_manifest.json
+└── test/
+    ├── basic_pick_place/
+    │   ├── 20.mp4
+    │   ├── 20.hdf5
+    │   └── ...
+    └── ...
+```
+
+后续推理计划：先从下载清单取 3 段做输入及推理检查，再跑全部 24 段并导出审阅页面。EgoDex 是人类第一视角视频，应使用官方 `caption.profile: human`、`views: main`，不能因名字含 Dex 就沿用机器人 `dex` 配置。复用已有 TempSeg / Captioner 权重和 80 GB GPU 环境；没有双腕相机输入，也不需要把 HDF5 骨骼数据送入 FLORA。
+
+先以不提供参考任务文本的方式检查视觉标注能力。HDF5 的 `llm_description` 及可逆任务的 `which_llm_description` / `llm_description2` 可留作辅助审阅；官方说明这些自动文本可能出错，不能直接当逐段真值或准确率标签。若再测试带任务指令的模式，应分开保存结果。正式比较仍需人工动作区间和描述；本次 24 段是定性试验，不等同于官方 benchmark，也未核实与 FLORA 训练集是否重叠。
+
 ## CPU 测试
 
 在安装 `[data]` 的解释器中，从 physwam 根目录运行：

@@ -38,6 +38,8 @@ def main(argv=None):
     review.add_argument("--run", required=True)
     review.add_argument("--output", required=True)
     review.add_argument("--episode", help="Export only this episode id; default exports all caption jobs")
+    refresh = commands.add_parser("refresh-review", help="Update an existing review page without re-exporting videos")
+    refresh.add_argument("--report", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "verify-sources":
@@ -59,6 +61,10 @@ def main(argv=None):
             from .review import build_review
 
             result = build_review(args.run, args.output, args.episode)
+        elif args.command == "refresh-review":
+            from .review import refresh_review
+
+            result = refresh_review(args.report)
         else:
             from .evaluation import dense_quality, terminal_metrics
 

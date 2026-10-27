@@ -173,6 +173,15 @@ PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora review \
 
 审阅判定不自动视为 benchmark 准确率，也不生成真实标注。TempSeg 的时间段匹配和 Captioner 的独立评估仍需人工参考区间及一致的评分规则。
 
+更新审阅页面代码后，已有报告可只刷新 HTML，不重新导出视频或运行模型：
+
+```bash
+PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora refresh-review \
+  --report flora/runs/dual_caption_20261027_122901_review
+```
+
+三路视角并排显示，各自提供加载状态和放大按钮。慢网下可先点击播放并等待缓冲；再次点击可取消等待。片段切换、暂停或循环造成的旧播放请求取消不会显示为文件缺失。在线查看时，刷新后在浏览器强制刷新页面。
+
 有独立环境成功标签时：
 
 ```bash

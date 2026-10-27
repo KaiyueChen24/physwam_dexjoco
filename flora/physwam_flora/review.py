@@ -60,6 +60,39 @@ def review_segments(annotation):
     return result
 
 
+def write_review_page(report, output):
+    payload = json.dumps(report, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    template = Path(__file__).with_name("review.html").read_text()
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output, prefix=".index-", suffix=".html", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(template.replace("__FLORA_REPORT_JSON__", payload))
+        temporary.replace(output / "index.html")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def refresh_review(report_dir):
+    """Update an existing report's page without decoding or exporting videos."""
+    output = Path(report_dir).resolve()
+    report = json.loads((output / "report.json").read_text())
+    if report.get("schema_version") != 1 or not isinstance(report.get("episodes"), list) or not report["episodes"]:
+        raise ValueError("Not a supported review report")
+    for episode in report["episodes"]:
+        review_segments(episode)
+        cameras = episode.get("videos", {})
+        if not isinstance(cameras, dict) or "base" not in cameras:
+            raise ValueError("Report is missing its main camera")
+        for relative in cameras.values():
+            path = (output / relative).resolve()
+            if Path(relative).is_absolute() or not path.is_relative_to(output) or not path.is_file():
+                raise ValueError(f"Report video missing or outside report directory: {relative}")
+    write_review_page(report, output)
+    return {"page": str(output / "index.html"), "episodes": len(report["episodes"]), "videos_reencoded": False}
+
+
 def build_review(run_dir, output, episode_id=None):
     run_dir, output = Path(run_dir).resolve(), Path(output).resolve()
     if output.exists():
@@ -111,9 +144,7 @@ def build_review(run_dir, output, episode_id=None):
                                        "duration_s": annotation["duration_s"], "segments": segments,
                                        "videos": previews, "media": media})
         write_json(staging / "report.json", report)
-        payload = json.dumps(report, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
-        template = Path(__file__).with_name("review.html").read_text()
-        (staging / "index.html").write_text(template.replace("__FLORA_REPORT_JSON__", payload))
+        write_review_page(report, staging)
         staging.rename(output)
     return {"output": str(output), "page": str(output / "index.html"), "episodes": len(report["episodes"]),
             "note": "Viewing copies only; predictions unchanged. Human feedback is not benchmark accuracy."}

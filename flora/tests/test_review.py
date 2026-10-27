@@ -7,7 +7,7 @@ import unittest
 
 from physwam_flora.common import sha256, write_json, write_jsonl
 from physwam_flora.media import probe
-from physwam_flora.review import build_review
+from physwam_flora.review import build_review, refresh_review
 
 HAS_MEDIA = all(importlib.util.find_spec(name) for name in ("av", "numpy"))
 
@@ -78,3 +78,22 @@ class Review(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source video changed"):
                 build_review(run, output)
             self.assertFalse(output.exists())
+
+    def test_refresh_updates_only_page_and_checks_missing_cameras(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run, _ = fixture(root)
+            output = root / "review"
+            build_review(run, output)
+            report = output / "report.json"
+            hashes = {p: sha256(p) for p in output.rglob("*.mp4")}
+            hashes[report] = sha256(report)
+            page = output / "index.html"
+            page.write_text("old page")
+            self.assertFalse(refresh_review(output)["videos_reencoded"])
+            self.assertIn('name="flora-review-version" content="2"', page.read_text())
+            for path, digest in hashes.items():
+                self.assertEqual(sha256(path), digest)
+            (output / "videos/sample/wrist_left.mp4").unlink()
+            with self.assertRaisesRegex(ValueError, "video missing"):
+                refresh_review(output)

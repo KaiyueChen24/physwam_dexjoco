@@ -159,6 +159,20 @@ HF_HOME="$PWD/flora/models/huggingface" FLORA_MODEL_CACHE="$PWD/flora/models/dat
 
 ## 结果评估
 
+Caption 推理完成后，可生成离线视频审阅页面：
+
+```bash
+PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora review \
+  --run flora/runs/dual_caption_20261027_122901 \
+  --output flora/runs/dual_caption_20261027_122901_review
+```
+
+`--run` 指向一次成功的 `--stage caption` 输出目录；`--episode <id>` 可只导出一条。命令在 CPU 上为实际送入 Captioner 的相机生成普通 H.264 High / yuv420p 观看副本，保留帧数、尺寸及帧率，并验证时间轴。原始无损文件、模型输出与权重不改动。需要原输入视频仍位于 `run.json` / `jobs.jsonl` 记录的路径，报告目录必须不存在。
+
+将整个报告目录（含 `index.html`、`report.json` 和 `videos/`）下载到电脑，浏览器打开 `index.html`。无需安装前端依赖或访问外部网站。页面支持相机同步播放、时间线跳转、片段循环、分段和描述的人工判定及备注，点击“导出人工审阅 JSON”保存反馈。浏览器本地存储只是临时便利，提交评审时以导出文件为准。所有片段都展示，包括空描述和失败状态；并发动作分行显示，不强制互斥。
+
+审阅判定不自动视为 benchmark 准确率，也不生成真实标注。TempSeg 的时间段匹配和 Captioner 的独立评估仍需人工参考区间及一致的评分规则。
+
 有独立环境成功标签时：
 
 ```bash

@@ -34,6 +34,10 @@ def main(argv=None):
     summary.add_argument("--labels")
     summary.add_argument("--threshold", type=float, default=5.0)
     summary.add_argument("--output")
+    review = commands.add_parser("review", help="Build a portable caption review page and compatible video copies (CPU only)")
+    review.add_argument("--run", required=True)
+    review.add_argument("--output", required=True)
+    review.add_argument("--episode", help="Export only this episode id; default exports all caption jobs")
     args = parser.parse_args(argv)
     try:
         if args.command == "verify-sources":
@@ -51,6 +55,10 @@ def main(argv=None):
 
             result = run(load_config(args.config), args.manifest, args.output, args.stage,
                          gpus=args.gpus, dry_run=args.dry_run, native_check=args.native_check)
+        elif args.command == "review":
+            from .review import build_review
+
+            result = build_review(args.run, args.output, args.episode)
         else:
             from .evaluation import dense_quality, terminal_metrics
 

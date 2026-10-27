@@ -17,3 +17,6 @@ physwam-flora = "physwam_flora.cli:main"
 
 [tool.setuptools]
 packages = ["physwam_flora"]
+
+[tool.setuptools.package-data]
+physwam_flora = ["review.html"]

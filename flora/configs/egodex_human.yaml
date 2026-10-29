@@ -1,0 +1,22 @@
+schema_version: 1
+tasks: null  # 使用下载清单中的全部任务
+
+source:
+  kind: egodex  # 读取已下载的 MP4/HDF5 配对文件
+  root: /aifs/chenkaiyue/datasets/egodex_subset  # 含 download_manifest.json 的目录
+  episodes: null  # 使用下载时选定的 episode 编号
+  limit_per_task: 3  # 每任务恰好 3 段；不足时报错
+
+runtime:
+  gpus: "5"  # 物理 GPU 编号；命令行 --gpus 可覆盖
+  captioner_python: flora/.venv-captioner/bin/python  # 已有推理环境
+  hf_home: flora/models/huggingface  # Hugging Face 缓存
+  model_cache: flora/models/data_engine  # 已有模型权重
+
+caption:
+  profile: human  # 人类第一视角输入
+  views: main  # 单视角
+  yam32: false  # 不启用机器人三视角模式
+  include_audit: true  # 保存模型输入审计记录
+
+# 首轮 instruction 为空；HDF5 的自动描述不送入模型。

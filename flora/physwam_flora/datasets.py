@@ -140,13 +140,17 @@ def prepare(config, output):
     if output.exists():
         raise FileExistsError(f"Use a new preparation directory: {output}")
     kind = config["source"]["kind"]
-    if kind not in {"lerobot", "rollout", "manifest"}:
+    if kind not in {"lerobot", "rollout", "manifest", "egodex"}:
         raise ValueError(f"Unknown source kind: {kind}")
     output.mkdir(parents=True)
     if kind == "lerobot":
         rows = lerobot_rows(config, output / "media")
     elif kind == "rollout":
         rows = rollout_rows(config)
+    elif kind == "egodex":
+        from .egodex import egodex_rows
+
+        rows = egodex_rows(config)
     else:
         from .common import read_manifest
 

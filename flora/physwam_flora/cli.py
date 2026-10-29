@@ -40,6 +40,9 @@ def main(argv=None):
     review.add_argument("--episode", help="Export only this episode id; default exports all caption jobs")
     refresh = commands.add_parser("refresh-review", help="Update an existing review page without re-exporting videos")
     refresh.add_argument("--report", required=True)
+    timing = commands.add_parser("caption-timing", help="Summarize per-episode official caption elapsed_s")
+    timing.add_argument("--run", required=True)
+    timing.add_argument("--group", choices=["all", "single", "dual", "human"], default="all")
     args = parser.parse_args(argv)
     try:
         if args.command == "verify-sources":
@@ -65,6 +68,10 @@ def main(argv=None):
             from .review import refresh_review
 
             result = refresh_review(args.report)
+        elif args.command == "caption-timing":
+            from .evaluation import caption_timing
+
+            result = caption_timing(args.run, args.group)
         else:
             from .evaluation import dense_quality, terminal_metrics
 

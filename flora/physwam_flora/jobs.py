@@ -60,6 +60,8 @@ def build_jobs(rows, config, stage):
             if three:
                 job.update(left_wrist=cameras["wrist_left"], right_wrist=cameras["wrist_right"])
         else:
+            if not row["instruction"].strip():
+                raise ValueError(f"{row['id']}: {stage} requires a task instruction; blank instructions are caption-only")
             job = {"id": row["id"], "task": row["instruction"], "videos": [cameras[r] for r in roles]}
             if stage == "rubric":
                 if row.get("task_name") not in rubric_map:

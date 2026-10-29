@@ -244,9 +244,46 @@ python3 -u flora/scripts/download_egodex.py \
     └── ...
 ```
 
-后续推理计划：先从下载清单取 3 段做输入及推理检查，再跑全部 24 段并导出审阅页面。EgoDex 是人类第一视角视频，应使用官方 `caption.profile: human`、`views: main`，不能因名字含 Dex 就沿用机器人 `dex` 配置。复用已有 TempSeg / Captioner 权重和 80 GB GPU 环境；没有双腕相机输入，也不需要把 HDF5 骨骼数据送入 FLORA。
+EgoDex 是人类第一视角视频，使用 `configs/egodex_human.yaml` 中的官方 `caption.profile: human`、`views: main`。复用已有 TempSeg / Captioner 权重和 80 GB GPU 环境，没有双腕相机输入。准备入口只读取 `download_manifest.json` 中的样本，检查 MP4/HDF5 大小和 CRC、完整解码视频，直接引用原始 MP4，不重编码、不重采样；不需要安装 HDF5 骨骼读取环境。
 
 先以不提供参考任务文本的方式检查视觉标注能力。HDF5 的 `llm_description` 及可逆任务的 `which_llm_description` / `llm_description2` 可留作辅助审阅；官方说明这些自动文本可能出错，不能直接当逐段真值或准确率标签。若再测试带任务指令的模式，应分开保存结果。正式比较仍需人工动作区间和描述；本次 24 段是定性试验，不等同于官方 benchmark，也未核实与 FLORA 训练集是否重叠。
+
+准备全部 24 段输入（输出目录须不存在）：
+
+```bash
+PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora prepare \
+  --config flora/configs/egodex_human.yaml --output flora/runs/egodex_input
+
+CUDA_VISIBLE_DEVICES="" PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora run \
+  --config flora/configs/egodex_human.yaml \
+  --manifest flora/runs/egodex_input/episodes.jsonl \
+  --stage caption --native-check --output flora/runs/egodex_native_check
+```
+
+原生检查不联网、不加载模型、不占 GPU。需要先试 3 段时，从清单中分别取 `basic_pick_place`、`insert_remove_usb`、`make_sandwich` 的首条另存一个清单；`run` 以传入清单为准。确认后使用完整清单运行：
+
+```bash
+HF_HUB_OFFLINE=1 HF_HUB_CACHE="$PWD/flora/models/huggingface/hub" PYTHONPATH=flora \
+  flora/.venv-captioner/bin/python -m physwam_flora run \
+  --config flora/configs/egodex_human.yaml \
+  --manifest flora/runs/egodex_input/episodes.jsonl \
+  --stage caption --gpus 5 --output flora/runs/egodex_caption
+
+PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora review \
+  --run flora/runs/egodex_caption --output flora/runs/egodex_review
+```
+
+空指令通过 manifest 中显式的 `instruction_mode: none` 声明，仅用于 caption；Rewarder 仍要求任务指令。原始 HDF5 的路径记录在输入清单的来源字段中，其文本和姿态数据均不进入模型任务。
+
+已有 caption 运行可读取官方标注的 `elapsed_s` 统计耗时：
+
+```bash
+PYTHONPATH=flora flora/.venv-captioner/bin/python -m physwam_flora caption-timing \
+  --run flora/runs/all_tasks5_20261027_150304/caption_gpu5_20261027_163002 \
+  --group dual
+```
+
+返回总体及每个任务的均值、中位数、范围和处理秒数/视频秒数。`--group single / human / all` 可切换统计范围。只统计完整的真实推理运行，缺失耗时会报错，不用部分结果冒充全批次平均。口径是上游记录的模型加载、分段和描述时间，不包含入口视频校验、末尾模型释放或审阅视频转码；不根据文件修改时间估算 GPU 吞吐。
 
 ## CPU 测试
 

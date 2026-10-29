@@ -63,3 +63,12 @@ def test_gpu_check_fails_on_cpu_environment():
         pytest.skip("requires a CPU-only test process")
     with pytest.raises(AssertionError, match="未检测到可用 CUDA GPU"):
         checker.check_gpu()
+
+
+def test_current_training_profiles_without_removed_smoke_config():
+    configs = checker.check_training_profiles(ROOT)
+    assert set(configs) == {"fastwam_single", "fastwam_dual", "fastwam_single_rand_full", "fastwam_dual_rand_full"}
+    dual_full = configs["fastwam_dual_rand_full"]
+    assert dual_full["framework"]["group"]["data_regime"] == "rand_full"
+    assert len(dual_full["data"]["train"]["tasks"]) == 5
+    assert dual_full["framework"]["launch"]["num_processes"] == 8

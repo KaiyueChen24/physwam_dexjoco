@@ -67,8 +67,14 @@ def validate_manifest(rows):
         if name in ids:
             raise ValueError(f"Duplicate episode id: {name}")
         ids.add(name)
-        if not isinstance(row.get("instruction"), str) or not row["instruction"].strip():
+        instruction = row.get("instruction")
+        mode = row.get("instruction_mode", "provided")
+        if mode not in {"provided", "none"}:
+            raise ValueError(f"{name}: instruction_mode must be provided or none")
+        if not isinstance(instruction, str) or (mode == "provided" and not instruction.strip()):
             raise ValueError(f"{name}: an explicit task instruction is required")
+        if mode == "none" and instruction != "":
+            raise ValueError(f"{name}: instruction_mode=none requires an empty instruction")
         cameras = row.get("cameras")
         if not isinstance(cameras, dict) or not cameras or "base" not in cameras:
             raise ValueError(f"{name}: cameras must include base")

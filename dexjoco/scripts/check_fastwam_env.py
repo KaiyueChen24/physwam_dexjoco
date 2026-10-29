@@ -64,6 +64,22 @@ def check_video_and_parquet():
         assert pq.read_table(path).to_pydict() == {"episode_index": [0, 1], "value": [1.0, 2.0]}
 
 
+def check_training_profiles(root):
+    import yaml
+
+    # Exercise current production profiles without data access or model initialization.
+    configs = {}
+    for profile in ("fastwam_single", "fastwam_dual", "fastwam_single_rand_full", "fastwam_dual_rand_full"):
+        command = [sys.executable, str(root / "scripts/train_fastwam_group.py"), "--experiment",
+                   f"configs/experiments/{profile}.yaml", "--run-name", "environment_check", "--dry-run"]
+        result = subprocess.run(command, cwd=root, check=True, text=True, capture_output=True, timeout=60)
+        config = yaml.safe_load(result.stdout)
+        assert config["framework"]["model"] == "fastwam"
+        configs[profile] = config
+        print(f"配置检查通过：{profile}，{config['framework']['launch']}")
+    return configs
+
+
 def check_cpu(root):
     import numpy as np
     import torch
@@ -92,15 +108,7 @@ def check_cpu(root):
     sample = np.arange(12, dtype=np.float32).reshape(3, 4)
     np.testing.assert_array_equal(msgpack_numpy.unpackb(msgpack_numpy.packb(sample)), sample)
     check_video_and_parquet()
-    import yaml
-    # Check both real CLI profiles without accessing data, creating runs or initializing a model.
-    for profile in ("fastwam_smoke", "fastwam_single"):
-        command = [sys.executable, str(root / "scripts/train_fastwam_group.py"), "--experiment",
-                   f"configs/experiments/{profile}.yaml", "--run-name", "environment_check", "--dry-run"]
-        result = subprocess.run(command, cwd=root, check=True, text=True, capture_output=True, timeout=60)
-        config = yaml.safe_load(result.stdout)
-        assert config["framework"]["model"] == "fastwam"
-        print(f"配置检查通过：{profile}，{config['framework']['launch']}")
+    check_training_profiles(root)
     return {"cpu_check_passed": True, "checks": ["imports", "cpu_optimizer", "msgpack_numpy",
             "pyav_decode", "parquet", "train_cli_profiles"], "torch_cuda_build": torch.version.cuda}
 

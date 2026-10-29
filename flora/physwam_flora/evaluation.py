@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import math
 from statistics import mean
+from statistics import median
+import json
+from pathlib import Path
 
 from .common import read_jsonl
 
@@ -71,3 +74,49 @@ def dense_quality(path):
             "invalid_clips": invalid, "episodes_with_invalid_clips": [r["id"] for r in rows if r["invalid_clips"]],
             "usable_without_parse_fallback": invalid == 0,
             "note": "Upstream replaces unparseable dense windows with normal labels. Inspect invalid_clips before interpreting scores."}
+
+
+def caption_timing(run_dir, group="all"):
+    """Summarize native elapsed_s, without inferring timings from file mtimes."""
+    root = Path(run_dir).resolve()
+    metadata = json.loads((root / "run.json").read_text())
+    status = json.loads((root / "status.json").read_text())
+    if metadata["plan"]["stage"] != "caption" or metadata["plan"].get("mode") != "inference" or status.get("status") != "complete":
+        raise ValueError("Timing requires a completed caption inference run")
+    groups = {"single": "single_arm", "dual": "dual_arm", "human": "human"}
+    if group not in {"all", *groups}:
+        raise ValueError(f"Unknown timing group: {group}")
+    rows = [row for row in metadata["episodes"] if group == "all" or row.get("robot") == groups[group]]
+    if not rows:
+        raise ValueError(f"No episodes for timing group: {group}")
+    ids, timings, by_task = set(), [], {}
+    for row in rows:
+        name = row["id"]
+        path = (root / "annotations" / f"{name}.json").resolve()
+        if name in ids or not path.is_relative_to(root / "annotations"):
+            raise ValueError(f"Invalid/duplicate caption episode: {name}")
+        ids.add(name)
+        annotation = json.loads(path.read_text())
+        elapsed, duration = annotation.get("elapsed_s"), annotation.get("duration_s")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
+               for value in (elapsed, duration)):
+            raise ValueError(f"{name}: missing/invalid elapsed_s or duration_s; refusing a partial average")
+        item = {"id": name, "elapsed_s": elapsed, "video_s": duration,
+                "segments": len(annotation["segments"])}
+        timings.append(item)
+        by_task.setdefault(row["task_name"], []).append(item)
+
+    def summarize(items):
+        times = [item["elapsed_s"] for item in items]
+        seconds = sum(times)
+        video_seconds = sum(item["video_s"] for item in items)
+        return {"episodes": len(items), "mean_s": round(mean(times), 3),
+                "median_s": round(median(times), 3), "min_s": min(times), "max_s": max(times),
+                "total_s": round(seconds, 3), "mean_video_s": round(video_seconds / len(items), 3),
+                "processing_s_per_video_s": round(seconds / video_seconds, 3),
+                "segments": sum(item["segments"] for item in items)}
+
+    return {"run": str(root), "group": group, **summarize(timings),
+            "by_task": {task: summarize(items) for task, items in by_task.items()},
+            "scope": "Official annotation elapsed_s: model loading, temporal segmentation and caption generation; "
+                     "excludes entry media validation, final session cleanup and review-video export."}
